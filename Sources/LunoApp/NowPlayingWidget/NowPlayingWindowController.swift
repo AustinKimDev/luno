@@ -12,6 +12,8 @@ final class NowPlayingWindowController: NSWindowController {
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
     private var currentlyIgnoresMouse = false
+    private var dragStartFrame: NSRect?
+    private var dragStartMouseLocation: NSPoint?
 
     init(viewModel: NowPlayingViewModel) {
         self.viewModel = viewModel
@@ -28,8 +30,9 @@ final class NowPlayingWindowController: NSWindowController {
         window.level = Self.widgetLevel
         window.collectionBehavior = [.stationary]
         window.ignoresMouseEvents = false
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.hidesOnDeactivate = false
+        window.contentEdgeInset = NowPlayingPreferences.Style.glowMargin
 
         super.init(window: window)
         window.delegate = self
@@ -37,6 +40,7 @@ final class NowPlayingWindowController: NSWindowController {
         let root = RootContainer(viewModel: viewModel, windowController: self)
         let host = NowPlayingHostingView(rootView: root)
         host.widgetSize = viewModel.preferences.style.widgetSize
+        host.windowController = self
         window.contentView = host
         hostingView = host
     }
@@ -89,6 +93,13 @@ final class NowPlayingWindowController: NSWindowController {
 
     private func updateClickThroughForCursor(_ screenPoint: NSPoint) {
         guard let window, window.isVisible else { return }
+        guard !isDraggingWidget else {
+            if window.ignoresMouseEvents {
+                currentlyIgnoresMouse = false
+                window.ignoresMouseEvents = false
+            }
+            return
+        }
         let windowFrame = window.frame
         let margin = NowPlayingPreferences.Style.glowMargin
         let widgetSize = viewModel.preferences.style.widgetSize
@@ -107,6 +118,7 @@ final class NowPlayingWindowController: NSWindowController {
     func applySizeForCurrentStyle() {
         guard let window else { return }
         let size = viewModel.preferences.style.windowSize
+        (window as? NowPlayingFloatingWindow)?.contentEdgeInset = NowPlayingPreferences.Style.glowMargin
         var frame = window.frame
         frame.size = size
         window.setFrame(frame, display: true, animate: false)
@@ -134,6 +146,35 @@ final class NowPlayingWindowController: NSWindowController {
         viewModel.update(preferences: preferences)
     }
 
+    func beginWidgetDrag(at mouseLocation: NSPoint) {
+        dragStartFrame = window?.frame
+        dragStartMouseLocation = mouseLocation
+    }
+
+    var isDraggingWidget: Bool {
+        dragStartFrame != nil
+    }
+
+    func dragWidget(to mouseLocation: NSPoint) {
+        guard let window, let dragStartFrame, let dragStartMouseLocation else { return }
+        let target = NSPoint(
+            x: dragStartFrame.origin.x + mouseLocation.x - dragStartMouseLocation.x,
+            y: dragStartFrame.origin.y + mouseLocation.y - dragStartMouseLocation.y
+        )
+        let screenFrame = window.screen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let clamped = clampWindowOrigin(point: target, size: dragStartFrame.size, into: screenFrame)
+        window.setFrameOrigin(clamped)
+    }
+
+    func endWidgetDrag() {
+        dragStartFrame = nil
+        dragStartMouseLocation = nil
+        saveCurrentPosition()
+        updateClickThroughForCursor(NSEvent.mouseLocation)
+    }
+
     private func applyPresentationMode() {
         guard let window else { return }
         if viewModel.preferences.isPinned {
@@ -152,38 +193,60 @@ final class NowPlayingWindowController: NSWindowController {
             ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let displayIDs = NSScreen.screens.compactMap(\.lunoDisplayID).map(String.init)
         let preferredDisplayID = displayIDs.first { viewModel.preferences.positionsByDisplay[$0] != nil }
-        let size = viewModel.preferences.style.windowSize
+        let windowSize = viewModel.preferences.style.windowSize
+        let widgetSize = viewModel.preferences.style.widgetSize
+        let margin = NowPlayingPreferences.Style.glowMargin
 
         let position: NSPoint
         if let preferredDisplayID, let saved = viewModel.preferences.positionsByDisplay[preferredDisplayID] {
             position = NSPoint(x: saved.x, y: saved.y)
         } else {
             position = NSPoint(
-                x: visibleFrame.maxX - size.width - 24,
-                y: visibleFrame.minY + 24
+                x: visibleFrame.maxX - widgetSize.width - 24 - margin,
+                y: visibleFrame.minY + 24 - margin
             )
         }
 
-        let clamped = clamp(point: position, size: size, into: visibleFrame)
-        window.setFrame(NSRect(origin: clamped, size: size), display: true)
+        let clamped = clampWindowOrigin(point: position, size: windowSize, into: visibleFrame)
+        window.setFrame(NSRect(origin: clamped, size: windowSize), display: true)
     }
 
-    private func clamp(point: NSPoint, size: CGSize, into frame: NSRect) -> NSPoint {
-        let x = min(max(point.x, frame.minX), frame.maxX - size.width)
-        let y = min(max(point.y, frame.minY), frame.maxY - size.height)
+    private func clampWindowOrigin(point: NSPoint, size: CGSize, into frame: NSRect) -> NSPoint {
+        let margin = NowPlayingPreferences.Style.glowMargin
+        let minX = frame.minX - margin
+        let maxX = frame.maxX - size.width + margin
+        let minY = frame.minY - margin
+        let maxY = frame.maxY - size.height + margin
+        let x = min(max(point.x, minX), maxX)
+        let y = min(max(point.y, minY), maxY)
         return NSPoint(x: x, y: y)
     }
 }
 
 @MainActor
 private final class NowPlayingFloatingWindow: NSPanel {
+    var contentEdgeInset: CGFloat = 0
+
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        let screenFrame = screen?.visibleFrame ?? screen?.frame ?? frameRect
+        let minX = screenFrame.minX - contentEdgeInset
+        let maxX = screenFrame.maxX - frameRect.width + contentEdgeInset
+        let minY = screenFrame.minY - contentEdgeInset
+        let maxY = screenFrame.maxY - frameRect.height + contentEdgeInset
+        var constrained = frameRect
+        constrained.origin.x = min(max(frameRect.origin.x, minX), maxX)
+        constrained.origin.y = min(max(frameRect.origin.y, minY), maxY)
+        return constrained
+    }
 }
 
 @MainActor
 final class NowPlayingHostingView<Content: View>: NSHostingView<Content> {
     var widgetSize: CGSize = .zero
+    weak var windowController: NowPlayingWindowController?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // point is in the superview's coordinate space. For a window's contentView this
@@ -196,7 +259,21 @@ final class NowPlayingHostingView<Content: View>: NSHostingView<Content> {
             height: widgetSize.height
         )
         guard widgetRect.contains(point) else { return nil }
-        return super.hitTest(point)
+        return super.hitTest(point) ?? self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        windowController?.beginWidgetDrag(at: NSEvent.mouseLocation)
+        super.mouseDown(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        windowController?.dragWidget(to: NSEvent.mouseLocation)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        windowController?.endWidgetDrag()
+        super.mouseUp(with: event)
     }
 }
 
@@ -228,9 +305,6 @@ private struct RootContainer: View {
                     canControl: track.source != .mediaRemote && !track.isAdvertisement,
                     onCommand: { intent in viewModel.send(intent) }
                 )
-                .onHover { hovering in
-                    viewModel.isHovering = hovering
-                }
                 .opacity(viewModel.visible ? 1 : 0)
             } else {
                 WaitingForMusicView()
@@ -249,8 +323,14 @@ private struct RootContainer: View {
             .buttonStyle(.plain)
             .help(viewModel.preferences.isPinned ? "Unpin widget" : "Pin above apps and full screen spaces")
             .padding(6)
+            .opacity(viewModel.isHovering ? 1 : 0)
+            .allowsHitTesting(viewModel.isHovering)
+            .animation(.easeOut(duration: 0.15), value: viewModel.isHovering)
         }
         .frame(width: widgetSize.width, height: widgetSize.height)
+        .onHover { hovering in
+            viewModel.isHovering = hovering
+        }
         .padding(NowPlayingPreferences.Style.glowMargin)
     }
 }

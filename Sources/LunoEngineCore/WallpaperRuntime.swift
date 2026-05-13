@@ -26,6 +26,7 @@ public enum WallpaperRuntimeError: Error, LocalizedError {
 @MainActor
 public final class WallpaperRuntime {
     private var controllers: [CGDirectDisplayID: WallpaperWindowController] = [:]
+    public var renderingStateDidChange: (() -> Void)?
 
     public init() {
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -43,6 +44,13 @@ public final class WallpaperRuntime {
         Array(controllers.keys).sorted()
     }
 
+    public var renderingDisplayIDs: [CGDirectDisplayID] {
+        controllers
+            .filter { $0.value.isRendering }
+            .map(\.key)
+            .sorted()
+    }
+
     private func reorderFront() {
         for controller in controllers.values {
             controller.show()
@@ -54,19 +62,23 @@ public final class WallpaperRuntime {
         preset: WallpaperPreset?,
         displayID: CGDirectDisplayID?,
         frameRate: Int,
-        audioProvider: @escaping @MainActor () -> AudioScalars
+        pauseWhenOccluded: Bool,
+        audioProvider: @escaping @MainActor () -> AudioScalars,
+        albumPaletteProvider: @escaping @MainActor () -> AlbumPalette = { .fallback }
     ) throws {
         try show(
             package: package,
             preset: preset,
             displayID: displayID,
             frameRate: frameRate,
+            pauseWhenOccluded: pauseWhenOccluded,
             audioProvider: {
                 audioProvider().featuresForRuntime
             },
             audioReactorPreferencesProvider: {
                 .defaults
             },
+            albumPaletteProvider: albumPaletteProvider,
             usesAudioReactor: false
         )
     }
@@ -76,16 +88,20 @@ public final class WallpaperRuntime {
         preset: WallpaperPreset?,
         displayID: CGDirectDisplayID?,
         frameRate: Int,
+        pauseWhenOccluded: Bool,
         audioProvider: @escaping @MainActor () -> AudioFeatures,
-        audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences
+        audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences,
+        albumPaletteProvider: @escaping @MainActor () -> AlbumPalette = { .fallback }
     ) throws {
         try show(
             package: package,
             preset: preset,
             displayID: displayID,
             frameRate: frameRate,
+            pauseWhenOccluded: pauseWhenOccluded,
             audioProvider: audioProvider,
             audioReactorPreferencesProvider: audioReactorPreferencesProvider,
+            albumPaletteProvider: albumPaletteProvider,
             usesAudioReactor: true
         )
     }
@@ -95,8 +111,10 @@ public final class WallpaperRuntime {
         preset: WallpaperPreset?,
         displayID: CGDirectDisplayID?,
         frameRate: Int,
+        pauseWhenOccluded: Bool,
         audioProvider: @escaping @MainActor () -> AudioFeatures,
         audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences,
+        albumPaletteProvider: @escaping @MainActor () -> AlbumPalette,
         usesAudioReactor: Bool
     ) throws {
         let screens = targetScreens(displayID: displayID)
@@ -109,9 +127,14 @@ public final class WallpaperRuntime {
                 package: package,
                 preset: preset,
                 frameRate: frameRate,
+                pauseWhenOccluded: pauseWhenOccluded,
                 audioProvider: audioProvider,
                 audioReactorPreferencesProvider: audioReactorPreferencesProvider,
-                usesAudioReactor: usesAudioReactor
+                albumPaletteProvider: albumPaletteProvider,
+                usesAudioReactor: usesAudioReactor,
+                renderingStateDidChange: { [weak self] in
+                    self?.renderingStateDidChange?()
+                }
             )
             controllers[screenDisplayID] = controller
             controller.show()
@@ -121,6 +144,7 @@ public final class WallpaperRuntime {
     public func stop(displayID: CGDirectDisplayID? = nil) {
         if let displayID {
             controllers.removeValue(forKey: displayID)?.close()
+            renderingStateDidChange?()
             return
         }
 
@@ -128,16 +152,23 @@ public final class WallpaperRuntime {
             controller.close()
         }
         controllers.removeAll()
+        renderingStateDidChange?()
     }
 
     public func refreshDisplayLayout() {
-        for (displayID, controller) in controllers {
+        var removedController = false
+        for displayID in activeDisplayIDs {
+            guard let controller = controllers[displayID] else { continue }
             guard let screen = NSScreen.screens.first(where: { $0.lunoDisplayID == displayID }) else {
                 controller.close()
                 controllers.removeValue(forKey: displayID)
+                removedController = true
                 continue
             }
             controller.updateFrame(for: screen)
+        }
+        if removedController {
+            renderingStateDidChange?()
         }
     }
 
@@ -152,16 +183,24 @@ public final class WallpaperRuntime {
 @MainActor
 private final class WallpaperWindowController {
     private let window: NSWindow
+    private let pauseWhenOccluded: Bool
+    private let renderingStateDidChange: () -> Void
+    private var occlusionObserver: NSObjectProtocol?
 
     init(
         screen: NSScreen,
         package: LunoPackageRecord,
         preset: WallpaperPreset?,
         frameRate: Int,
+        pauseWhenOccluded: Bool,
         audioProvider: @escaping @MainActor () -> AudioFeatures,
         audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences,
-        usesAudioReactor: Bool
+        albumPaletteProvider: @escaping @MainActor () -> AlbumPalette,
+        usesAudioReactor: Bool,
+        renderingStateDidChange: @escaping () -> Void
     ) throws {
+        self.pauseWhenOccluded = pauseWhenOccluded
+        self.renderingStateDidChange = renderingStateDidChange
         let geometry = WallpaperWindowGeometry(screenFrame: screen.frame)
         let configuration = WallpaperWindowConfiguration()
         let contentView = try MetalWallpaperView(
@@ -171,6 +210,7 @@ private final class WallpaperWindowController {
             frameRate: frameRate,
             audioProvider: audioProvider,
             audioReactorPreferencesProvider: audioReactorPreferencesProvider,
+            albumPaletteProvider: albumPaletteProvider,
             usesAudioReactor: usesAudioReactor
         )
 
@@ -189,13 +229,32 @@ private final class WallpaperWindowController {
         window.animationBehavior = .none
         window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
         window.collectionBehavior = configuration.collectionBehavior
+
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.syncRenderingState()
+            }
+        }
+    }
+
+    var isRendering: Bool {
+        (window.contentView as? MetalWallpaperView)?.isRendering ?? false
     }
 
     func show() {
         window.orderFrontRegardless()
+        syncRenderingState()
     }
 
     func close() {
+        if let occlusionObserver {
+            NotificationCenter.default.removeObserver(occlusionObserver)
+            self.occlusionObserver = nil
+        }
         (window.contentView as? MetalWallpaperView)?.prepareForRemoval()
         window.contentView = nil
         window.orderOut(nil)
@@ -204,6 +263,17 @@ private final class WallpaperWindowController {
 
     func updateFrame(for screen: NSScreen) {
         window.setFrame(screen.frame, display: true)
+        syncRenderingState()
+    }
+
+    private func syncRenderingState() {
+        let shouldPause = pauseWhenOccluded && !window.occlusionState.contains(.visible)
+        guard let contentView = window.contentView as? MetalWallpaperView else { return }
+        let wasRendering = contentView.isRendering
+        contentView.setRenderingPaused(shouldPause)
+        if wasRendering != contentView.isRendering {
+            renderingStateDidChange()
+        }
     }
 }
 
@@ -217,6 +287,7 @@ private final class MetalWallpaperView: MTKView {
         frameRate: Int,
         audioProvider: @escaping @MainActor () -> AudioFeatures,
         audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences,
+        albumPaletteProvider: @escaping @MainActor () -> AlbumPalette,
         usesAudioReactor: Bool
     ) throws {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -237,6 +308,7 @@ private final class MetalWallpaperView: MTKView {
             preset: preset,
             audioProvider: audioProvider,
             audioReactorPreferencesProvider: audioReactorPreferencesProvider,
+            albumPaletteProvider: albumPaletteProvider,
             usesAudioReactor: usesAudioReactor
         )
         delegate = renderer
@@ -252,6 +324,18 @@ private final class MetalWallpaperView: MTKView {
         isPaused = true
         delegate = nil
         wallpaperRenderer = nil
+    }
+
+    var isRendering: Bool {
+        !isPaused
+    }
+
+    func setRenderingPaused(_ paused: Bool) {
+        guard isPaused != paused else { return }
+        if !paused {
+            wallpaperRenderer?.resetTiming()
+        }
+        isPaused = paused
     }
 }
 
@@ -272,7 +356,10 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
     private let samplerState: (any MTLSamplerState)?
     private let audioProvider: @MainActor () -> AudioFeatures
     private let audioReactorPreferencesProvider: @MainActor () -> AudioReactorPreferences
+    private let albumPaletteProvider: @MainActor () -> AlbumPalette
     private let usesAudioReactor: Bool
+    private var smoothedAlbumPalette = AlbumPalette.fallback
+    private var hasSampledAlbumPalette = false
 
     init(
         view: MTKView,
@@ -280,6 +367,7 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         preset: WallpaperPreset?,
         audioProvider: @escaping @MainActor () -> AudioFeatures,
         audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences,
+        albumPaletteProvider: @escaping @MainActor () -> AlbumPalette,
         usesAudioReactor: Bool
     ) throws {
         guard let device = view.device,
@@ -291,6 +379,7 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         self.commandQueue = commandQueue
         self.audioProvider = audioProvider
         self.audioReactorPreferencesProvider = audioReactorPreferencesProvider
+        self.albumPaletteProvider = albumPaletteProvider
         self.usesAudioReactor = usesAudioReactor
         self.displayScale = Float(view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
         self.parameterPack = ShaderParameterPack.make(manifest: package.manifest, preset: preset)
@@ -369,12 +458,14 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         }
 
         let now = CACurrentMediaTime()
+        let deltaTime = Float(now - lastTime)
         let rawAudio = audioProvider()
         let audioReactorPreferences = audioReactorPreferencesProvider()
         let audio = usesAudioReactor ? shapedScalars(rawAudio, preferences: audioReactorPreferences) : rawAudio.scalars
+        let albumPalette = smoothedPalette(toward: albumPaletteProvider(), deltaTime: deltaTime)
         var uniforms = LunoShaderUniforms(
             time: Float(now - startTime),
-            deltaTime: Float(now - lastTime),
+            deltaTime: deltaTime,
             resolution: viewportSize,
             displayScale: displayScale,
             audioRMS: audio.rms,
@@ -385,7 +476,11 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
             colorParameter0: parameterPack.color0,
             colorParameter1: parameterPack.color1,
             colorParameter2: parameterPack.color2,
-            colorParameter3: parameterPack.color3
+            colorParameter3: parameterPack.color3,
+            albumColor0: albumPalette.background,
+            albumColor1: albumPalette.primary,
+            albumColor2: albumPalette.secondary,
+            albumColor3: albumPalette.highlight
         )
         lastTime = now
 
@@ -409,6 +504,7 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
                 bass: audio.bass,
                 mid: audio.mid,
                 treble: audio.treble,
+                time: Float(now - startTime),
                 overlayOpacity: Float(AudioReactorPreferences.clamp(audioReactorPreferences.overlayOpacity)),
                 bassPulseStrength: Float(AudioReactorPreferences.clamp(audioReactorPreferences.bassPulseStrength)),
                 flags: audioReactorPreferences.overlayFlags,
@@ -441,6 +537,18 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
             mid: preferences.shaped(features.mid),
             treble: preferences.shaped(features.treble)
         )
+    }
+
+    private func smoothedPalette(toward target: AlbumPalette, deltaTime: Float) -> AlbumPalette {
+        guard hasSampledAlbumPalette else {
+            hasSampledAlbumPalette = true
+            smoothedAlbumPalette = target
+            return target
+        }
+
+        let amount = min(1, max(0, deltaTime * 1.7))
+        smoothedAlbumPalette = smoothedAlbumPalette.interpolated(toward: target, amount: amount)
+        return smoothedAlbumPalette
     }
 
     private func downsampleShapedSpectrum(
@@ -482,6 +590,10 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    func resetTiming() {
+        lastTime = CACurrentMediaTime()
+    }
+
 }
 
 internal enum LunoOverlayShaderSource {
@@ -495,6 +607,7 @@ internal enum LunoOverlayShaderSource {
         float bass;
         float mid;
         float treble;
+        float time;
         float overlayOpacity;
         float bassPulseStrength;
         uint flags;
@@ -533,6 +646,12 @@ internal enum LunoOverlayShaderSource {
         return mix(clamp(spectrum[left], 0.0, 1.0), clamp(spectrum[right], 0.0, 1.0), fract(scaled));
     }
 
+    static float roundedBoxMask(float2 point, float2 halfSize, float radius, float feather) {
+        float2 q = abs(point) - halfSize + radius;
+        float distance = length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+        return 1.0 - smoothstep(0.0, feather, distance);
+    }
+
     fragment half4 lunoOverlayFragment(
         OverlayVertexOut in [[stage_in]],
         constant OverlayUniforms &uniforms [[buffer(0)]],
@@ -541,42 +660,89 @@ internal enum LunoOverlayShaderSource {
         float2 uv = in.uv;
         float opacity = clamp(uniforms.overlayOpacity, 0.0, 1.0);
         uint count = min(uniforms.barCount, 32u);
-        float3 color = float3(0.38 + uniforms.treble * 0.35, 0.72 + uniforms.mid * 0.22, 1.0);
-        float alpha = 0.0;
+        float pixel = 1.4 / max(min(uniforms.resolution.x, uniforms.resolution.y), 1.0);
+        float energy = clamp(uniforms.rms * 0.55 + uniforms.bass * 0.45, 0.0, 1.0);
+        float3 cyan = float3(0.14, 0.78, 1.0);
+        float3 violet = float3(0.63, 0.38, 1.0);
+        float3 coral = float3(1.0, 0.47, 0.36);
+        float3 coolAccent = mix(cyan, violet, clamp(uniforms.mid * 0.55 + uniforms.treble * 0.45, 0.0, 1.0));
+        float3 warmAccent = mix(coolAccent, coral, uniforms.bass * 0.35);
+        float3 accumulatedColor = float3(0.0);
+        float accumulatedAlpha = 0.0;
 
         if ((uniforms.flags & 1u) != 0u) {
             float aspect = max(uniforms.resolution.x / max(uniforms.resolution.y, 1.0), 0.1);
-            float2 centered = (uv - 0.5) * float2(aspect, 1.0);
+            float2 centered = (uv - float2(0.5, 0.53)) * float2(aspect, 1.0);
             float distanceFromCenter = length(centered);
             float strength = clamp(uniforms.bassPulseStrength, 0.0, 1.0);
-            float radius = 0.16 + uniforms.bass * 0.18 * strength;
-            float width = 0.008 + uniforms.rms * 0.022;
-            float ring = 1.0 - smoothstep(width, width * 2.1, abs(distanceFromCenter - radius));
-            float glow = (1.0 - smoothstep(0.0, 0.24, abs(distanceFromCenter - radius))) * 0.22;
-            alpha = max(alpha, (ring + glow) * (0.2 + uniforms.bass * 0.8) * strength);
+            float radius = 0.17 + uniforms.bass * 0.10 * strength;
+            float ringWidth = 0.006 + uniforms.rms * 0.018;
+            float angle = atan2(centered.y, centered.x);
+            float shimmer = 0.78 + 0.22 * sin(angle * 10.0 - uniforms.time * 1.35 + uniforms.treble * 4.0);
+            float outerRing = 1.0 - smoothstep(ringWidth, ringWidth + pixel * 5.0, abs(distanceFromCenter - radius));
+            float innerRing = 1.0 - smoothstep(ringWidth * 0.65, ringWidth * 0.65 + pixel * 4.0, abs(distanceFromCenter - radius * 0.68));
+            float halo = pow(1.0 - smoothstep(0.0, 0.34 + uniforms.bass * 0.08, distanceFromCenter), 2.8);
+            float aperture = smoothstep(0.045, 0.16, distanceFromCenter);
+            float pulseAlpha = (
+                outerRing * (0.38 + uniforms.bass * 0.34) * shimmer
+                + innerRing * 0.12
+                + halo * aperture * (0.13 + energy * 0.12)
+            ) * strength;
+            float3 pulseColor = mix(coolAccent, warmAccent, uniforms.bass * 0.45);
+            accumulatedColor += pulseColor * pulseAlpha;
+            accumulatedAlpha += pulseAlpha;
         }
 
         if (((uniforms.flags & 2u) != 0u) && count > 0) {
-            float scaledX = uv.x * float(count);
-            uint index = min(uint(floor(scaledX)), count - 1);
-            float localX = fract(scaledX);
-            float value = clamp(spectrum[index], 0.0, 1.0);
-            float baseY = 0.045;
-            float height = 0.035 + value * 0.24;
-            float insideBar = step(0.12, localX) * step(localX, 0.88) * step(baseY, uv.y) * step(uv.y, baseY + height);
-            alpha = max(alpha, insideBar * (0.18 + value * 0.55));
+            float railStart = 0.075;
+            float railWidth = 0.85;
+            float railX = (uv.x - railStart) / railWidth;
+            float edgeFade = smoothstep(0.0, 0.065, railX) * (1.0 - smoothstep(0.935, 1.0, railX));
+            if (railX >= 0.0 && railX <= 1.0) {
+                float cell = railX * float(count);
+                uint index = min(uint(floor(cell)), count - 1);
+                float value = clamp(spectrum[index], 0.0, 1.0);
+                float cellWidth = railWidth / float(count);
+                float barCenterX = railStart + (float(index) + 0.5) * cellWidth;
+                float baseY = 0.058;
+                float barHeight = 0.018 + pow(value, 0.72) * 0.215;
+                float2 center = float2(barCenterX, baseY + barHeight * 0.5);
+                float2 halfSize = float2(cellWidth * 0.27, barHeight * 0.5);
+                float radius = min(halfSize.x * 0.95, max(pixel * 3.0, halfSize.y * 0.2));
+                float core = roundedBoxMask(uv - center, halfSize, radius, pixel * 1.7);
+                float glow = roundedBoxMask(uv - center, halfSize + float2(cellWidth * 0.12, 0.024 + value * 0.022), radius + pixel * 5.0, pixel * 7.0);
+                float rail = (1.0 - smoothstep(pixel, pixel * 5.0, abs(uv.y - baseY))) * edgeFade;
+                float mist = (1.0 - smoothstep(baseY, baseY + 0.34, uv.y)) * edgeFade * energy;
+                float3 barColor = mix(cyan, violet, clamp(value * 0.75 + uniforms.treble * 0.25, 0.0, 1.0));
+                float barAlpha = (core * (0.32 + value * 0.48) + glow * (0.08 + value * 0.12)) * edgeFade;
+                accumulatedColor += barColor * barAlpha;
+                accumulatedAlpha += barAlpha;
+                accumulatedColor += coolAccent * (rail * 0.12 + mist * 0.055);
+                accumulatedAlpha += rail * 0.10 + mist * 0.035;
+            }
         }
 
         if (((uniforms.flags & 4u) != 0u) && count > 0) {
-            float value = sampleSpectrum(spectrum, count, uv.x);
-            float waveY = 0.2 + value * 0.24;
-            float lineWidth = 0.004 + uniforms.rms * 0.012;
-            float line = 1.0 - smoothstep(lineWidth, lineWidth * 2.0, abs(uv.y - waveY));
-            alpha = max(alpha, line * (0.22 + value * 0.5));
+            float railStart = 0.075;
+            float railWidth = 0.85;
+            float railX = (uv.x - railStart) / railWidth;
+            float edgeFade = smoothstep(0.0, 0.07, railX) * (1.0 - smoothstep(0.93, 1.0, railX));
+            if (railX >= 0.0 && railX <= 1.0) {
+                float value = sampleSpectrum(spectrum, count, railX);
+                float drift = sin(railX * 9.0 + uniforms.time * 0.55) * 0.006 * (0.35 + uniforms.treble);
+                float waveY = 0.23 + value * 0.21 + drift;
+                float lineWidth = 0.0024 + uniforms.rms * 0.006;
+                float line = 1.0 - smoothstep(lineWidth, lineWidth + pixel * 4.0, abs(uv.y - waveY));
+                float glow = 1.0 - smoothstep(lineWidth * 2.0, lineWidth * 9.0 + pixel * 4.0, abs(uv.y - waveY));
+                float waveAlpha = (line * (0.34 + value * 0.34) + glow * (0.08 + value * 0.10)) * edgeFade;
+                accumulatedColor += mix(cyan, warmAccent, value * 0.42) * waveAlpha;
+                accumulatedAlpha += waveAlpha;
+            }
         }
 
-        alpha = clamp(alpha * opacity, 0.0, 1.0);
-        return half4(half3(color), half(alpha));
+        float alpha = clamp(accumulatedAlpha * opacity, 0.0, 1.0);
+        float3 color = accumulatedAlpha > 0.0001 ? accumulatedColor / accumulatedAlpha : coolAccent;
+        return half4(half3(clamp(color, float3(0.0), float3(1.0))), half(alpha));
     }
     """
 }
@@ -595,6 +761,10 @@ private struct LunoShaderUniforms {
     var colorParameter1: SIMD4<Float>
     var colorParameter2: SIMD4<Float>
     var colorParameter3: SIMD4<Float>
+    var albumColor0: SIMD4<Float>
+    var albumColor1: SIMD4<Float>
+    var albumColor2: SIMD4<Float>
+    var albumColor3: SIMD4<Float>
 }
 
 private struct LunoOverlayUniforms {
@@ -603,6 +773,7 @@ private struct LunoOverlayUniforms {
     var bass: Float
     var mid: Float
     var treble: Float
+    var time: Float
     var overlayOpacity: Float
     var bassPulseStrength: Float
     var flags: UInt32

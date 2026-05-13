@@ -87,4 +87,41 @@ final class ShaderParameterPackTests: XCTestCase {
         XCTAssertEqual(pack.numeric, SIMD4<Float>(1.4, 0.0, 0.0, 0.0))
         XCTAssertEqual(pack.color0, SIMD4<Float>(1.0, 0.8, 0.0, 1.0))
     }
+
+    func testPacksEnumParametersAsSelectedOptionIndex() throws {
+        let manifest = WallpaperPackageManifest(
+            id: "com.example.wallpaper",
+            name: "Example",
+            version: "1.0.0",
+            engineVersion: "1.0",
+            author: "Luno",
+            entryShader: "Example.metal",
+            assets: [],
+            parameters: [
+                .init(
+                    id: "mode",
+                    name: "Mode",
+                    type: .enum,
+                    defaultValue: .string("Ambient Bloom"),
+                    options: ["Ambient Bloom", "Spectrum Ribbons", "Particle Field"]
+                ),
+                .init(id: "brightness", name: "Brightness", type: .float, defaultValue: .float(1.0))
+            ],
+            audioBindings: [],
+            preview: "preview.png",
+            tags: []
+        )
+        let preset = WallpaperPreset(
+            id: "custom",
+            packageID: manifest.id,
+            name: "Custom",
+            values: [
+                "mode": .string("Particle Field")
+            ]
+        )
+
+        let pack = ShaderParameterPack.make(manifest: manifest, preset: preset)
+
+        XCTAssertEqual(pack.numeric, SIMD4<Float>(2.0, 1.0, 0.0, 0.0))
+    }
 }

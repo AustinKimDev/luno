@@ -9,11 +9,14 @@ protocol LibrarySectionViewDelegate: AnyObject {
     func librarySectionDidRequestSavePreset(_ view: LibrarySectionView)
     func librarySectionDidRequestImport(_ view: LibrarySectionView)
     func librarySectionDidRequestExport(_ view: LibrarySectionView)
+    func librarySectionDidChangeLiveSelection(_ view: LibrarySectionView)
 }
 
 @MainActor
 final class LibrarySectionView: NSView {
     weak var delegate: LibrarySectionViewDelegate?
+
+    static let audioReactiveParameterID = "reactive"
 
     let packagePopup = NSPopUpButton()
     let displayPopup = NSPopUpButton()
@@ -105,12 +108,20 @@ final class LibrarySectionView: NSView {
             controlsByParameterID[parameter.id] = control
             parameterStack.addArrangedSubview(labeledRow(label: parameter.name, view: control))
         }
+
+        if usesSyntheticAudioReactiveControl(for: package.manifest) {
+            let value = matchingPreset?.values[Self.audioReactiveParameterID] ?? .bool(true)
+            let control = makeBoolControl(value: value)
+            controlsByParameterID[Self.audioReactiveParameterID] = control
+            parameterStack.addArrangedSubview(labeledRow(label: "Audio Reactive", view: control))
+        }
     }
 
     @objc private func applyTapped() { delegate?.librarySectionDidRequestApply(self) }
     @objc private func saveTapped() { delegate?.librarySectionDidRequestSavePreset(self) }
     @objc private func importTapped() { delegate?.librarySectionDidRequestImport(self) }
     @objc private func exportTapped() { delegate?.librarySectionDidRequestExport(self) }
+    @objc private func parameterControlChanged() { delegate?.librarySectionDidChangeLiveSelection(self) }
     @objc private func noop() {}
 
     private func labeledRow(label: String, view: NSView) -> NSStackView {
@@ -132,18 +143,19 @@ final class LibrarySectionView: NSView {
                 value: value.floatValue ?? 0,
                 minValue: parameter.min ?? 0,
                 maxValue: parameter.max ?? 1,
-                target: nil,
-                action: nil
+                target: self,
+                action: #selector(parameterControlChanged)
             )
+            slider.isContinuous = true
             slider.widthAnchor.constraint(equalToConstant: 220).isActive = true
             return slider
         case .bool:
-            let button = NSButton(checkboxWithTitle: "", target: nil, action: nil)
-            button.state = (value.boolValue ?? false) ? .on : .off
-            return button
+            return makeBoolControl(value: value)
         case .color:
             let well = NSColorWell()
             well.color = NSColor(hexString: value.stringValue ?? "#FFFFFF") ?? .white
+            well.target = self
+            well.action = #selector(parameterControlChanged)
             return well
         case .enum:
             let popup = NSPopUpButton()
@@ -151,9 +163,22 @@ final class LibrarySectionView: NSView {
             if let selected = value.stringValue {
                 popup.selectItem(withTitle: selected)
             }
+            popup.target = self
+            popup.action = #selector(parameterControlChanged)
             popup.widthAnchor.constraint(equalToConstant: 220).isActive = true
             return popup
         }
+    }
+
+    private func makeBoolControl(value: ParameterValue) -> NSButton {
+        let button = NSButton(checkboxWithTitle: "", target: self, action: #selector(parameterControlChanged))
+        button.state = (value.boolValue ?? false) ? .on : .off
+        return button
+    }
+
+    private func usesSyntheticAudioReactiveControl(for manifest: WallpaperPackageManifest) -> Bool {
+        !manifest.audioBindings.isEmpty
+            && !manifest.parameters.contains { $0.id == Self.audioReactiveParameterID }
     }
 
     func currentParameterValues(for manifest: WallpaperPackageManifest) -> [String: ParameterValue] {
@@ -175,6 +200,10 @@ final class LibrarySectionView: NSView {
                 let selected = (control as? NSPopUpButton)?.selectedItem?.title ?? parameter.defaultValue.stringValue ?? ""
                 values[parameter.id] = .string(selected)
             }
+        }
+        if usesSyntheticAudioReactiveControl(for: manifest),
+           let control = controlsByParameterID[Self.audioReactiveParameterID] as? NSButton {
+            values[Self.audioReactiveParameterID] = .bool(control.state == .on)
         }
         return values
     }

@@ -29,6 +29,17 @@ final class PerformancePolicyTests: XCTestCase {
         XCTAssertTrue(lowPower.shouldPause)
     }
 
+    func testBalancedPolicyPausesWhenWallpaperIsNotVisible() {
+        let decision = PerformancePolicy.balanced.decision(
+            powerSource: .powerAdapter,
+            isLowPowerModeEnabled: false,
+            isFullscreenAppActive: false,
+            isWallpaperVisible: false
+        )
+
+        XCTAssertTrue(decision.shouldPause)
+    }
+
     func testBalancedPolicyAllowsSixtyFPSOnPowerAdapterWhenRequested() {
         let decision = PerformancePolicy.balanced.highQuality.decision(
             powerSource: .powerAdapter,

@@ -6,7 +6,7 @@ import ScreenCaptureKit
 
 @available(macOS 15.0, *)
 public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
-    private let queue = DispatchQueue(label: "com.luno.audio-capture")
+    private let queue = DispatchQueue(label: "com.luno.audio-capture", qos: .userInteractive)
     private let lock = NSLock()
     private let analyzer = AudioSpectrumAnalyzer()
     private var stream: SCStream?
@@ -41,6 +41,8 @@ public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStream
         configuration.queueDepth = 3
         configuration.capturesAudio = true
         configuration.excludesCurrentProcessAudio = true
+        configuration.sampleRate = 48_000
+        configuration.channelCount = 2
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
@@ -98,26 +100,46 @@ public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStream
             return
         }
 
-        var audioBufferList = AudioBufferList()
+        // ScreenCaptureKit delivers non-interleaved stereo Float32, so the AudioBufferList
+        // needs one slot per channel. A stack-allocated AudioBufferList only reserves one
+        // slot, which produces kCMSampleBufferError_ArrayTooSmall (-12737). Query the
+        // required size first, then allocate raw bytes to hold N buffers.
+        var sizeNeeded = 0
+        let sizeStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: &sizeNeeded,
+            bufferListOut: nil,
+            bufferListSize: 0,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: nil
+        )
+        guard sizeStatus == noErr, sizeNeeded > 0 else { return }
+
+        let listPtr = UnsafeMutableRawPointer.allocate(
+            byteCount: sizeNeeded,
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { listPtr.deallocate() }
+        let listAddr = listPtr.assumingMemoryBound(to: AudioBufferList.self)
+
         var blockBuffer: CMBlockBuffer?
         let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
             sampleBuffer,
             bufferListSizeNeededOut: nil,
-            bufferListOut: &audioBufferList,
-            bufferListSize: MemoryLayout<AudioBufferList>.stride,
+            bufferListOut: listAddr,
+            bufferListSize: sizeNeeded,
             blockBufferAllocator: kCFAllocatorDefault,
             blockBufferMemoryAllocator: kCFAllocatorDefault,
             flags: UInt32(kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment),
             blockBufferOut: &blockBuffer
         )
+        guard status == noErr else { return }
 
-        guard status == noErr,
-              let data = audioBufferList.mBuffers.mData
-        else {
-            return
-        }
-
-        let count = Int(audioBufferList.mBuffers.mDataByteSize) / MemoryLayout<Float>.stride
+        let abl = UnsafeMutableAudioBufferListPointer(listAddr)
+        guard abl.count > 0, let data = abl[0].mData else { return }
+        let count = Int(abl[0].mDataByteSize) / MemoryLayout<Float>.stride
         let pointer = data.assumingMemoryBound(to: Float.self)
         let buffer = UnsafeBufferPointer(start: pointer, count: count)
         withExtendedLifetime(blockBuffer) {

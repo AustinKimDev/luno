@@ -191,8 +191,19 @@ final class SettingsWindowController: NSWindowController {
         )
     }
 
+    private func applySelectedPackage() {
+        guard let package = selectedPackage else { return }
+        delegate?.settingsWindow(
+            self,
+            didRequestApply: package,
+            preset: selectedPreset(for: package),
+            displayID: selectedDisplayID
+        )
+    }
+
     @objc private func packageSelectionChanged() {
         librarySection.rebuildParameterControls(with: selectedPackage, presets: presets)
+        applySelectedPackage()
     }
 }
 
@@ -204,13 +215,7 @@ extension SettingsWindowController: SettingsSidebarDelegate {
 
 extension SettingsWindowController: LibrarySectionViewDelegate {
     func librarySectionDidRequestApply(_ view: LibrarySectionView) {
-        guard let package = selectedPackage else { return }
-        delegate?.settingsWindow(
-            self,
-            didRequestApply: package,
-            preset: selectedPreset(for: package),
-            displayID: selectedDisplayID
-        )
+        applySelectedPackage()
     }
 
     func librarySectionDidRequestSavePreset(_ view: LibrarySectionView) {
@@ -225,6 +230,10 @@ extension SettingsWindowController: LibrarySectionViewDelegate {
     func librarySectionDidRequestExport(_ view: LibrarySectionView) {
         guard let package = selectedPackage else { return }
         delegate?.settingsWindow(self, didRequestExport: package)
+    }
+
+    func librarySectionDidChangeLiveSelection(_ view: LibrarySectionView) {
+        applySelectedPackage()
     }
 }
 

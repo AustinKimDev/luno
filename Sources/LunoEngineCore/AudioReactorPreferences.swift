@@ -22,6 +22,341 @@ public enum AudioReactorResponse: String, Codable, Equatable, Sendable, CaseIter
     }
 }
 
+public enum AudioReactorVisualizerLayout: String, Codable, Equatable, Sendable, CaseIterable {
+    case bottom
+    case circle
+    case arc
+}
+
+public enum AudioReactorStylePresetID: String, Codable, Equatable, Sendable, CaseIterable {
+    case studio
+    case orbit
+    case club
+    case minimal
+    case ambient
+    case mono
+}
+
+public struct AudioReactorStylePreset: Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let style: AudioReactorStyle
+}
+
+public struct AudioReactorPalette: Codable, Equatable, Sendable {
+    public var primaryColor: String
+    public var secondaryColor: String
+    public var accentColor: String
+    public var glowColor: String
+
+    public init(
+        primaryColor: String,
+        secondaryColor: String,
+        accentColor: String,
+        glowColor: String
+    ) {
+        self.primaryColor = Self.normalizedHex(primaryColor) ?? Self.default.primaryColor
+        self.secondaryColor = Self.normalizedHex(secondaryColor) ?? Self.default.secondaryColor
+        self.accentColor = Self.normalizedHex(accentColor) ?? Self.default.accentColor
+        self.glowColor = Self.normalizedHex(glowColor) ?? Self.default.glowColor
+    }
+
+    public static let `default` = AudioReactorPalette(
+        uncheckedPrimaryColor: "#24C7FF",
+        secondaryColor: "#FF6B9C",
+        accentColor: "#7A5CFF",
+        glowColor: "#FFFFFF"
+    )
+
+    private init(
+        uncheckedPrimaryColor primaryColor: String,
+        secondaryColor: String,
+        accentColor: String,
+        glowColor: String
+    ) {
+        self.primaryColor = primaryColor
+        self.secondaryColor = secondaryColor
+        self.accentColor = accentColor
+        self.glowColor = glowColor
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            primaryColor: try container.decodeIfPresent(String.self, forKey: .primaryColor) ?? Self.default.primaryColor,
+            secondaryColor: try container.decodeIfPresent(String.self, forKey: .secondaryColor) ?? Self.default.secondaryColor,
+            accentColor: try container.decodeIfPresent(String.self, forKey: .accentColor) ?? Self.default.accentColor,
+            glowColor: try container.decodeIfPresent(String.self, forKey: .glowColor) ?? Self.default.glowColor
+        )
+    }
+
+    private static func normalizedHex(_ hex: String) -> String? {
+        let trimmed = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#").union(.whitespacesAndNewlines))
+        guard trimmed.count == 6, Int(trimmed, radix: 16) != nil else { return nil }
+        return "#\(trimmed.uppercased())"
+    }
+}
+
+public struct AudioReactorSpectrumStyle: Codable, Equatable, Sendable {
+    public var layout: AudioReactorVisualizerLayout
+    public var barCount: Int
+    public var barWidth: Double
+    public var barHeight: Double
+    public var spacing: Double
+    public var radius: Double
+    public var roundness: Double
+    public var smoothing: Double
+    public var glow: Double
+    public var arcStartDegrees: Double
+    public var arcEndDegrees: Double
+
+    public init(
+        layout: AudioReactorVisualizerLayout,
+        barCount: Int,
+        barWidth: Double,
+        barHeight: Double,
+        spacing: Double,
+        radius: Double,
+        roundness: Double,
+        smoothing: Double,
+        glow: Double,
+        arcStartDegrees: Double,
+        arcEndDegrees: Double
+    ) {
+        self.layout = layout
+        self.barCount = Self.clamp(barCount, min: 8, max: 96)
+        self.barWidth = Self.clamp01(barWidth)
+        self.barHeight = Self.clamp01(barHeight)
+        self.spacing = Self.clamp01(spacing)
+        self.radius = Self.clamp01(radius)
+        self.roundness = Self.clamp01(roundness)
+        self.smoothing = Self.clamp01(smoothing)
+        self.glow = Self.clamp01(glow)
+        self.arcStartDegrees = Self.clampAngle(arcStartDegrees)
+        self.arcEndDegrees = Self.clampAngle(arcEndDegrees)
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            layout: try container.decodeIfPresent(AudioReactorVisualizerLayout.self, forKey: .layout) ?? .bottom,
+            barCount: try container.decodeIfPresent(Int.self, forKey: .barCount) ?? 48,
+            barWidth: try container.decodeIfPresent(Double.self, forKey: .barWidth) ?? 0.48,
+            barHeight: try container.decodeIfPresent(Double.self, forKey: .barHeight) ?? 0.74,
+            spacing: try container.decodeIfPresent(Double.self, forKey: .spacing) ?? 0.35,
+            radius: try container.decodeIfPresent(Double.self, forKey: .radius) ?? 0.56,
+            roundness: try container.decodeIfPresent(Double.self, forKey: .roundness) ?? 0.82,
+            smoothing: try container.decodeIfPresent(Double.self, forKey: .smoothing) ?? 0.45,
+            glow: try container.decodeIfPresent(Double.self, forKey: .glow) ?? 0.48,
+            arcStartDegrees: try container.decodeIfPresent(Double.self, forKey: .arcStartDegrees) ?? -150,
+            arcEndDegrees: try container.decodeIfPresent(Double.self, forKey: .arcEndDegrees) ?? 150
+        )
+    }
+
+    fileprivate static func clamp01(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(max(value, 0), 1)
+    }
+
+    fileprivate static func clamp(_ value: Int, min minimum: Int, max maximum: Int) -> Int {
+        Swift.min(Swift.max(value, minimum), maximum)
+    }
+
+    fileprivate static func clampAngle(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(max(value, -180), 180)
+    }
+}
+
+public struct AudioReactorRingStyle: Codable, Equatable, Sendable {
+    public var radius: Double
+    public var thickness: Double
+    public var softness: Double
+    public var glow: Double
+    public var roundness: Double
+
+    public init(radius: Double, thickness: Double, softness: Double, glow: Double, roundness: Double) {
+        self.radius = AudioReactorSpectrumStyle.clamp01(radius)
+        self.thickness = min(max(AudioReactorSpectrumStyle.clamp01(thickness), 0), 0.08)
+        self.softness = AudioReactorSpectrumStyle.clamp01(softness)
+        self.glow = AudioReactorSpectrumStyle.clamp01(glow)
+        self.roundness = AudioReactorSpectrumStyle.clamp01(roundness)
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            radius: try container.decodeIfPresent(Double.self, forKey: .radius) ?? 0.36,
+            thickness: try container.decodeIfPresent(Double.self, forKey: .thickness) ?? 0.018,
+            softness: try container.decodeIfPresent(Double.self, forKey: .softness) ?? 0.55,
+            glow: try container.decodeIfPresent(Double.self, forKey: .glow) ?? 0.62,
+            roundness: try container.decodeIfPresent(Double.self, forKey: .roundness) ?? 0.9
+        )
+    }
+}
+
+public struct AudioReactorWaveStyle: Codable, Equatable, Sendable {
+    public var layout: AudioReactorVisualizerLayout
+    public var thickness: Double
+    public var amplitude: Double
+    public var smoothing: Double
+    public var glow: Double
+    public var radius: Double
+    public var arcStartDegrees: Double
+    public var arcEndDegrees: Double
+
+    public init(
+        layout: AudioReactorVisualizerLayout,
+        thickness: Double,
+        amplitude: Double,
+        smoothing: Double,
+        glow: Double,
+        radius: Double,
+        arcStartDegrees: Double,
+        arcEndDegrees: Double
+    ) {
+        self.layout = layout
+        self.thickness = min(max(AudioReactorSpectrumStyle.clamp01(thickness), 0), 0.08)
+        self.amplitude = AudioReactorSpectrumStyle.clamp01(amplitude)
+        self.smoothing = AudioReactorSpectrumStyle.clamp01(smoothing)
+        self.glow = AudioReactorSpectrumStyle.clamp01(glow)
+        self.radius = AudioReactorSpectrumStyle.clamp01(radius)
+        self.arcStartDegrees = AudioReactorSpectrumStyle.clampAngle(arcStartDegrees)
+        self.arcEndDegrees = AudioReactorSpectrumStyle.clampAngle(arcEndDegrees)
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            layout: try container.decodeIfPresent(AudioReactorVisualizerLayout.self, forKey: .layout) ?? .bottom,
+            thickness: try container.decodeIfPresent(Double.self, forKey: .thickness) ?? 0.012,
+            amplitude: try container.decodeIfPresent(Double.self, forKey: .amplitude) ?? 0.55,
+            smoothing: try container.decodeIfPresent(Double.self, forKey: .smoothing) ?? 0.6,
+            glow: try container.decodeIfPresent(Double.self, forKey: .glow) ?? 0.42,
+            radius: try container.decodeIfPresent(Double.self, forKey: .radius) ?? 0.58,
+            arcStartDegrees: try container.decodeIfPresent(Double.self, forKey: .arcStartDegrees) ?? -150,
+            arcEndDegrees: try container.decodeIfPresent(Double.self, forKey: .arcEndDegrees) ?? 150
+        )
+    }
+}
+
+public struct AudioReactorStyle: Codable, Equatable, Sendable {
+    public var presetID: String?
+    public var palette: AudioReactorPalette
+    public var spectrum: AudioReactorSpectrumStyle
+    public var ring: AudioReactorRingStyle
+    public var wave: AudioReactorWaveStyle
+
+    public init(
+        presetID: String?,
+        palette: AudioReactorPalette,
+        spectrum: AudioReactorSpectrumStyle,
+        ring: AudioReactorRingStyle,
+        wave: AudioReactorWaveStyle
+    ) {
+        self.presetID = presetID
+        self.palette = palette
+        self.spectrum = spectrum
+        self.ring = ring
+        self.wave = wave
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            presetID: try container.decodeIfPresent(String.self, forKey: .presetID),
+            palette: try container.decodeIfPresent(AudioReactorPalette.self, forKey: .palette) ?? .default,
+            spectrum: try container.decodeIfPresent(AudioReactorSpectrumStyle.self, forKey: .spectrum) ?? Self.default.spectrum,
+            ring: try container.decodeIfPresent(AudioReactorRingStyle.self, forKey: .ring) ?? Self.default.ring,
+            wave: try container.decodeIfPresent(AudioReactorWaveStyle.self, forKey: .wave) ?? Self.default.wave
+        )
+    }
+
+    public static let `default` = preset(.studio)
+
+    public static func preset(_ id: AudioReactorStylePresetID) -> AudioReactorStyle {
+        switch id {
+        case .studio:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: .default,
+                spectrum: AudioReactorSpectrumStyle(
+                    layout: .bottom,
+                    barCount: 48,
+                    barWidth: 0.48,
+                    barHeight: 0.74,
+                    spacing: 0.35,
+                    radius: 0.56,
+                    roundness: 0.82,
+                    smoothing: 0.45,
+                    glow: 0.48,
+                    arcStartDegrees: -150,
+                    arcEndDegrees: 150
+                ),
+                ring: AudioReactorRingStyle(radius: 0.36, thickness: 0.018, softness: 0.55, glow: 0.62, roundness: 0.9),
+                wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.012, amplitude: 0.55, smoothing: 0.6, glow: 0.42, radius: 0.58, arcStartDegrees: -150, arcEndDegrees: 150)
+            )
+        case .orbit:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#7BE7FF", secondaryColor: "#A78BFA", accentColor: "#FF8BD1", glowColor: "#DFFBFF"),
+                spectrum: AudioReactorSpectrumStyle(layout: .arc, barCount: 64, barWidth: 0.44, barHeight: 0.62, spacing: 0.42, radius: 0.58, roundness: 0.88, smoothing: 0.55, glow: 0.62, arcStartDegrees: -155, arcEndDegrees: 155),
+                ring: AudioReactorRingStyle(radius: 0.4, thickness: 0.014, softness: 0.72, glow: 0.72, roundness: 1),
+                wave: AudioReactorWaveStyle(layout: .arc, thickness: 0.01, amplitude: 0.5, smoothing: 0.72, glow: 0.5, radius: 0.5, arcStartDegrees: -150, arcEndDegrees: 150)
+            )
+        case .club:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#00F0FF", secondaryColor: "#FF2D95", accentColor: "#FFE66D", glowColor: "#FFFFFF"),
+                spectrum: AudioReactorSpectrumStyle(layout: .circle, barCount: 72, barWidth: 0.55, barHeight: 0.86, spacing: 0.28, radius: 0.5, roundness: 0.62, smoothing: 0.25, glow: 0.9, arcStartDegrees: -180, arcEndDegrees: 180),
+                ring: AudioReactorRingStyle(radius: 0.34, thickness: 0.026, softness: 0.42, glow: 0.92, roundness: 0.72),
+                wave: AudioReactorWaveStyle(layout: .circle, thickness: 0.015, amplitude: 0.75, smoothing: 0.35, glow: 0.75, radius: 0.46, arcStartDegrees: -180, arcEndDegrees: 180)
+            )
+        case .minimal:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#FFFFFF", secondaryColor: "#B8C1CC", accentColor: "#7A8491", glowColor: "#FFFFFF"),
+                spectrum: AudioReactorSpectrumStyle(layout: .bottom, barCount: 40, barWidth: 0.32, barHeight: 0.42, spacing: 0.55, radius: 0.46, roundness: 1, smoothing: 0.72, glow: 0.18, arcStartDegrees: -120, arcEndDegrees: 120),
+                ring: AudioReactorRingStyle(radius: 0.3, thickness: 0.01, softness: 0.78, glow: 0.25, roundness: 1),
+                wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.006, amplitude: 0.32, smoothing: 0.78, glow: 0.12, radius: 0.52, arcStartDegrees: -120, arcEndDegrees: 120)
+            )
+        case .ambient:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#8EE6A8", secondaryColor: "#6BD8FF", accentColor: "#E6D7A8", glowColor: "#EFFFF3"),
+                spectrum: AudioReactorSpectrumStyle(layout: .arc, barCount: 56, barWidth: 0.38, barHeight: 0.48, spacing: 0.5, radius: 0.62, roundness: 1, smoothing: 0.82, glow: 0.36, arcStartDegrees: -130, arcEndDegrees: 130),
+                ring: AudioReactorRingStyle(radius: 0.42, thickness: 0.012, softness: 0.86, glow: 0.5, roundness: 1),
+                wave: AudioReactorWaveStyle(layout: .arc, thickness: 0.007, amplitude: 0.38, smoothing: 0.9, glow: 0.34, radius: 0.6, arcStartDegrees: -135, arcEndDegrees: 135)
+            )
+        case .mono:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#F5F7FA", secondaryColor: "#AEB7C2", accentColor: "#6F7782", glowColor: "#FFFFFF"),
+                spectrum: AudioReactorSpectrumStyle(layout: .bottom, barCount: 52, barWidth: 0.42, barHeight: 0.56, spacing: 0.44, radius: 0.5, roundness: 0.7, smoothing: 0.62, glow: 0.28, arcStartDegrees: -145, arcEndDegrees: 145),
+                ring: AudioReactorRingStyle(radius: 0.36, thickness: 0.012, softness: 0.7, glow: 0.34, roundness: 0.86),
+                wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.008, amplitude: 0.42, smoothing: 0.7, glow: 0.25, radius: 0.56, arcStartDegrees: -145, arcEndDegrees: 145)
+            )
+        }
+    }
+
+    public static let presets: [AudioReactorStylePreset] = AudioReactorStylePresetID.allCases.map { id in
+        AudioReactorStylePreset(id: id.rawValue, name: id.displayName, style: preset(id))
+    }
+}
+
+private extension AudioReactorStylePresetID {
+    var displayName: String {
+        switch self {
+        case .studio: "Studio"
+        case .orbit: "Orbit"
+        case .club: "Club"
+        case .minimal: "Minimal"
+        case .ambient: "Ambient"
+        case .mono: "Mono"
+        }
+    }
+}
+
 public struct AudioReactorPreferences: Codable, Equatable, Sendable {
     public var isEnabled: Bool
     public var intensity: Double
@@ -31,6 +366,7 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
     public var showsSpectrumBars: Bool
     public var showsWaveLine: Bool
     public var overlayOpacity: Double
+    public var style: AudioReactorStyle
 
     public init(
         isEnabled: Bool,
@@ -40,7 +376,8 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
         showsPulseRing: Bool,
         showsSpectrumBars: Bool,
         showsWaveLine: Bool,
-        overlayOpacity: Double
+        overlayOpacity: Double,
+        style: AudioReactorStyle = .default
     ) {
         self.isEnabled = isEnabled
         self.intensity = intensity
@@ -50,6 +387,22 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
         self.showsSpectrumBars = showsSpectrumBars
         self.showsWaveLine = showsWaveLine
         self.overlayOpacity = overlayOpacity
+        self.style = style
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            isEnabled: try container.decode(Bool.self, forKey: .isEnabled),
+            intensity: try container.decode(Double.self, forKey: .intensity),
+            response: try container.decode(AudioReactorResponse.self, forKey: .response),
+            bassPulseStrength: try container.decode(Double.self, forKey: .bassPulseStrength),
+            showsPulseRing: try container.decode(Bool.self, forKey: .showsPulseRing),
+            showsSpectrumBars: try container.decode(Bool.self, forKey: .showsSpectrumBars),
+            showsWaveLine: try container.decode(Bool.self, forKey: .showsWaveLine),
+            overlayOpacity: try container.decode(Double.self, forKey: .overlayOpacity),
+            style: try container.decodeIfPresent(AudioReactorStyle.self, forKey: .style) ?? .default
+        )
     }
 
     public static let defaults = AudioReactorPreferences(
@@ -60,7 +413,8 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
         showsPulseRing: true,
         showsSpectrumBars: true,
         showsWaveLine: false,
-        overlayOpacity: 0.6
+        overlayOpacity: 0.6,
+        style: .default
     )
 
     public func shaped(_ features: AudioFeatures) -> AudioFeatures {

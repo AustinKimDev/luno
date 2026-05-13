@@ -30,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SettingsWindowControll
     private var appleMusicProvider: AppleMusicProvider?
     private var spotifyProvider: SpotifyProvider?
     private var mediaRemoteProvider: MediaRemoteProvider?
+    private var albumPalette: AlbumPalette = .fallback
+    private var albumPaletteGeneration = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -52,7 +54,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SettingsWindowControll
             try installBundledSamplesIfNeeded()
             try reloadLibraryState()
             setupStatusItem()
-            showLibrary()
             try restoreAssignments()
             reconcileAudioCaptureState()
             if nowPlayingPreferences.isEnabled {
@@ -195,10 +196,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SettingsWindowControll
             },
             audioReactorPreferencesProvider: { [weak self] in
                 guard let self else { return Self.disabledAudioReactorPreferences }
-                guard !package.manifest.audioBindings.isEmpty else {
+                guard !package.manifest.audioBindings.isEmpty,
+                      Self.isAudioReactiveEnabled(for: preset)
+                else {
                     return Self.disabledAudioReactorPreferences
                 }
                 return self.audioReactorPreferences
+            },
+            albumPaletteProvider: { [weak self] in
+                self?.albumPalette ?? .fallback
             }
         )
 
@@ -273,7 +279,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SettingsWindowControll
         let renderingDisplayIDs = Set(runtime.renderingDisplayIDs.map(String.init))
         for assignment in assignments where renderingDisplayIDs.contains(assignment.displayID) {
             guard let package = packages.first(where: { $0.manifest.id == assignment.packageID }) else { continue }
-            if !package.manifest.audioBindings.isEmpty { return true }
+            let preset = presets.first { $0.id == assignment.presetID && $0.packageID == assignment.packageID }
+            if !package.manifest.audioBindings.isEmpty,
+               Self.isAudioReactiveEnabled(for: preset) {
+                return true
+            }
         }
         return false
     }
@@ -426,6 +436,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SettingsWindowControll
             self?.nowPlayingPreferences = preferences
             self?.settingsWindowController?.configureNowPlaying(preferences)
         }
+        viewModel.onTrackChanged = { [weak self] track in
+            self?.updateAlbumPalette(from: track?.artworkData)
+        }
         viewModel.controlSender = { [weak self] command, source in
             guard let self else { return }
             switch source {
@@ -444,6 +457,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SettingsWindowControll
         viewModel.start()
         windowController.show()
         reconcileAudioCaptureState()
+    }
+
+    private func updateAlbumPalette(from artworkData: Data?) {
+        albumPaletteGeneration += 1
+        let generation = albumPaletteGeneration
+        guard let artworkData else {
+            return
+        }
+
+        Task.detached(priority: .utility) {
+            let palette = AlbumArtworkPaletteExtractor.extract(from: artworkData)
+            await MainActor.run {
+                guard generation == self.albumPaletteGeneration,
+                      let palette
+                else {
+                    return
+                }
+                self.albumPalette = palette
+            }
+        }
     }
 
     private func stopNowPlaying() {
@@ -496,6 +529,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SettingsWindowControll
         showsWaveLine: AudioReactorPreferences.defaults.showsWaveLine,
         overlayOpacity: AudioReactorPreferences.defaults.overlayOpacity
     )
+
+    private static func isAudioReactiveEnabled(for preset: WallpaperPreset?) -> Bool {
+        guard case .bool(let isEnabled)? = preset?.values[LibrarySectionView.audioReactiveParameterID] else {
+            return true
+        }
+        return isEnabled
+    }
 }
 
 private struct LunoAppPaths {

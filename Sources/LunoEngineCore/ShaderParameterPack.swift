@@ -44,6 +44,10 @@ public struct ShaderParameterPack: Equatable, Sendable {
             case .bool(let bool) where numericIndex < 4:
                 numeric[numericIndex] = bool ? 1 : 0
                 numericIndex += 1
+            case .string(let string) where parameter.type == .enum && numericIndex < 4:
+                guard let optionIndex = parameter.options?.firstIndex(of: string) else { continue }
+                numeric[numericIndex] = Float(optionIndex)
+                numericIndex += 1
             case .color(let color) where colorIndex < 4:
                 colors[colorIndex] = normalizedColor(from: color)
                 colorIndex += 1

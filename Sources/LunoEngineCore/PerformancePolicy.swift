@@ -20,12 +20,14 @@ public struct PerformancePolicy: Equatable, Sendable {
     public var powerAdapterFrameRate: Int
     public var pausesForFullscreenApps: Bool
     public var pausesForLowPowerMode: Bool
+    public var pausesWhenNotVisible: Bool
 
     public static let balanced = PerformancePolicy(
         batteryFrameRate: 30,
         powerAdapterFrameRate: 30,
         pausesForFullscreenApps: true,
-        pausesForLowPowerMode: true
+        pausesForLowPowerMode: true,
+        pausesWhenNotVisible: true
     )
 
     public var highQuality: PerformancePolicy {
@@ -38,18 +40,21 @@ public struct PerformancePolicy: Equatable, Sendable {
         batteryFrameRate: Int,
         powerAdapterFrameRate: Int,
         pausesForFullscreenApps: Bool,
-        pausesForLowPowerMode: Bool
+        pausesForLowPowerMode: Bool,
+        pausesWhenNotVisible: Bool = true
     ) {
         self.batteryFrameRate = batteryFrameRate
         self.powerAdapterFrameRate = powerAdapterFrameRate
         self.pausesForFullscreenApps = pausesForFullscreenApps
         self.pausesForLowPowerMode = pausesForLowPowerMode
+        self.pausesWhenNotVisible = pausesWhenNotVisible
     }
 
     public func decision(
         powerSource: PowerSource,
         isLowPowerModeEnabled: Bool,
-        isFullscreenAppActive: Bool
+        isFullscreenAppActive: Bool,
+        isWallpaperVisible: Bool = true
     ) -> PerformanceDecision {
         let frameRate = switch powerSource {
         case .battery:
@@ -57,7 +62,8 @@ public struct PerformancePolicy: Equatable, Sendable {
         case .powerAdapter:
             powerAdapterFrameRate
         }
-        let shouldPause = (pausesForFullscreenApps && isFullscreenAppActive)
+        let shouldPause = (pausesWhenNotVisible && !isWallpaperVisible)
+            || (pausesForFullscreenApps && isFullscreenAppActive)
             || (pausesForLowPowerMode && isLowPowerModeEnabled)
 
         return PerformanceDecision(frameRate: frameRate, shouldPause: shouldPause)

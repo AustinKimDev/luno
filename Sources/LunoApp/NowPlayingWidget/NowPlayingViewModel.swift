@@ -22,6 +22,7 @@ final class NowPlayingViewModel {
     var permissionState: PermissionState = .unknown
     var controlSender: ((NowPlayingControlCommand, NowPlayingSource) async throws -> Void)?
     var onPreferencesChanged: ((NowPlayingPreferences) -> Void)?
+    var onTrackChanged: ((ResolvedNowPlayingTrack?) -> Void)?
 
     var activeSource: NowPlayingSource? {
         track?.source
@@ -104,6 +105,15 @@ final class NowPlayingViewModel {
 
     func update(preferences: NowPlayingPreferences) {
         self.preferences = preferences
+        if preferences.keepVisibleWhilePaused {
+            fadeOutTask?.cancel()
+            fadeOutTask = nil
+            if track != nil {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    visible = true
+                }
+            }
+        }
         try? preferencesStore.save(preferences)
         onPreferencesChanged?(preferences)
     }
@@ -116,6 +126,7 @@ final class NowPlayingViewModel {
     private func handle(resolved: ResolvedNowPlayingTrack?) {
         fadeOutTask?.cancel()
         fadeOutTask = nil
+        onTrackChanged?(resolved)
 
         if let resolved, resolved.isPlaying {
             track = resolved
@@ -136,6 +147,11 @@ final class NowPlayingViewModel {
 
     private func scheduleFadeOut() {
         if preferences.keepVisibleWhilePaused {
+            if track != nil {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    visible = true
+                }
+            }
             return
         }
 
@@ -146,7 +162,7 @@ final class NowPlayingViewModel {
             } catch {
                 return
             }
-            if !isHovering {
+            if !preferences.keepVisibleWhilePaused, !isHovering {
                 withAnimation(.easeIn(duration: 0.4)) {
                     visible = false
                 }
