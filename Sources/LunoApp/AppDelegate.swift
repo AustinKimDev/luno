@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
     private var performancePolicy = PerformancePolicy.balanced
     @available(macOS 15.0, *)
     private var audioCapture: SystemAudioCaptureService?
+    private var audioReactorPreferencesStore: AudioReactorPreferencesStore?
+    private var audioReactorPreferences: AudioReactorPreferences = .defaults
     private var nowPlayingPreferencesStore: NowPlayingPreferencesStore?
     private var nowPlayingPreferences: NowPlayingPreferences = .defaults
     private var appleMusicRunner = MusicAppScriptRunner()
@@ -37,6 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
             library = LocalPackageLibrary(libraryURL: paths.packages, archiveService: archiveService)
             presetStore = PresetStore(fileURL: paths.presets)
             assignmentStore = DisplayAssignmentStore(fileURL: paths.assignments)
+            let audioReactorStore = AudioReactorPreferencesStore(fileURL: paths.audioReactorPreferences)
+            audioReactorPreferencesStore = audioReactorStore
+            audioReactorPreferences = (try? audioReactorStore.load()) ?? .defaults
             let nowPlayingStore = NowPlayingPreferencesStore(fileURL: paths.nowPlayingPreferences)
             nowPlayingPreferencesStore = nowPlayingStore
             nowPlayingPreferences = (try? nowPlayingStore.load()) ?? .defaults
@@ -145,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         }
 
         libraryWindowController?.configure(packages: packages, presets: presets)
+        libraryWindowController?.configureAudioReactor(audioReactorPreferences)
         libraryWindowController?.configureNowPlaying(nowPlayingPreferences)
         libraryWindowController?.showWindow(nil)
         libraryWindowController?.window?.makeKeyAndOrderFront(nil)
@@ -180,7 +186,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
             displayID: displayID,
             frameRate: decision.frameRate,
             audioProvider: { [weak self] in
-                self?.audioScalars ?? .silent
+                self?.audioFeatures ?? .silent
+            },
+            audioReactorPreferencesProvider: { [weak self] in
+                guard let self else { return .defaults }
+                guard !package.manifest.audioBindings.isEmpty else {
+                    return Self.disabledAudioReactorPreferences
+                }
+                return self.audioReactorPreferences
             }
         )
 
@@ -213,13 +226,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
     private func presentError(_ error: Error) {
         let alert = NSAlert(error: error)
         alert.runModal()
-    }
-
-    private var audioScalars: AudioScalars {
-        if #available(macOS 15.0, *) {
-            return audioCapture?.scalars ?? .silent
-        }
-        return .silent
     }
 
     private var audioFeatures: AudioFeatures {
@@ -255,7 +261,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         }
     }
 
-    private func anyActivePackageNeedsAudio() -> Bool {
+    private func anyActivePackageNeedsAudioReactor() -> Bool {
+        guard audioReactorPreferences.isEnabled else { return false }
         guard let assignmentStore else { return false }
         let assignments = (try? assignmentStore.load()) ?? []
         let activeDisplayIDs = Set(runtime.activeDisplayIDs.map(String.init))
@@ -267,7 +274,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
     }
 
     private func reconcileAudioCaptureState() {
-        if anyActivePackageNeedsAudio() {
+        let nowPlayingNeedsAudio = nowPlayingPreferences.isEnabled && nowPlayingPreferences.audioReactivityEnabled
+        if anyActivePackageNeedsAudioReactor() || nowPlayingNeedsAudio {
             startAudioCaptureIfAvailable()
         } else {
             stopAudioCaptureIfRunning()
@@ -372,6 +380,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         updateNowPlaying(preferences: nowPlayingPreferences)
     }
 
+    func libraryWindow(_ controller: LibraryWindowController, didChange audioReactorPreferences: AudioReactorPreferences) {
+        updateAudioReactor(preferences: audioReactorPreferences)
+    }
+
     private func startNowPlaying() {
         guard nowPlayingCoordinator == nil else { return }
         guard let nowPlayingPreferencesStore else { return }
@@ -441,7 +453,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         } else if !preferences.isEnabled && wasEnabled {
             stopNowPlaying()
         }
+        reconcileAudioCaptureState()
     }
+
+    private func updateAudioReactor(preferences: AudioReactorPreferences) {
+        audioReactorPreferences = preferences
+        try? audioReactorPreferencesStore?.save(preferences)
+        reconcileAudioCaptureState()
+    }
+
+    private static let disabledAudioReactorPreferences = AudioReactorPreferences(
+        isEnabled: false,
+        intensity: AudioReactorPreferences.defaults.intensity,
+        response: AudioReactorPreferences.defaults.response,
+        bassPulseStrength: AudioReactorPreferences.defaults.bassPulseStrength,
+        showsPulseRing: AudioReactorPreferences.defaults.showsPulseRing,
+        showsSpectrumBars: AudioReactorPreferences.defaults.showsSpectrumBars,
+        showsWaveLine: AudioReactorPreferences.defaults.showsWaveLine,
+        overlayOpacity: AudioReactorPreferences.defaults.overlayOpacity
+    )
 }
 
 private struct LunoAppPaths {
@@ -449,6 +479,7 @@ private struct LunoAppPaths {
     var packages: URL
     var presets: URL
     var assignments: URL
+    var audioReactorPreferences: URL
     var nowPlayingPreferences: URL
 
     static func `default`() throws -> LunoAppPaths {
@@ -464,6 +495,7 @@ private struct LunoAppPaths {
             packages: root.appending(path: "Packages", directoryHint: .isDirectory),
             presets: root.appending(path: "presets.json"),
             assignments: root.appending(path: "assignments.json"),
+            audioReactorPreferences: root.appending(path: "audio-reactor.json"),
             nowPlayingPreferences: root.appending(path: "now-playing.json")
         )
     }

@@ -15,6 +15,7 @@ protocol LibraryWindowControllerDelegate: AnyObject {
     )
     func libraryWindow(_ controller: LibraryWindowController, didSave preset: WallpaperPreset)
     func libraryWindow(_ controller: LibraryWindowController, didChange nowPlayingPreferences: NowPlayingPreferences)
+    func libraryWindow(_ controller: LibraryWindowController, didChange audioReactorPreferences: AudioReactorPreferences)
 }
 
 @MainActor
@@ -34,9 +35,18 @@ final class LibraryWindowController: NSWindowController {
     private let nowPlayingStylePopup = NSPopUpButton()
     private let nowPlayingReactivitySwitch = NSSwitch()
     private let nowPlayingKeepVisibleSwitch = NSSwitch()
+    private var audioReactorPreferences: AudioReactorPreferences = .defaults
+    private let audioReactorEnableSwitch = NSSwitch()
+    private let audioReactorIntensitySlider = NSSlider(value: AudioReactorPreferences.defaults.intensity, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let audioReactorResponseControl = NSSegmentedControl(labels: ["Soft", "Punchy", "Hard"], trackingMode: .selectOne, target: nil, action: nil)
+    private let audioReactorBassPulseSlider = NSSlider(value: AudioReactorPreferences.defaults.bassPulseStrength, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let audioReactorPulseRingSwitch = NSSwitch()
+    private let audioReactorSpectrumBarsSwitch = NSSwitch()
+    private let audioReactorWaveLineSwitch = NSSwitch()
+    private let audioReactorOverlayOpacitySlider = NSSlider(value: AudioReactorPreferences.defaults.overlayOpacity, minValue: 0, maxValue: 1, target: nil, action: nil)
 
     convenience init() {
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 460))
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 620))
         let window = NSWindow(
             contentRect: contentView.frame,
             styleMask: [.titled, .closable, .miniaturizable],
@@ -65,6 +75,12 @@ final class LibraryWindowController: NSWindowController {
 
         let index = NowPlayingPreferences.Style.allCases.firstIndex(of: preferences.style) ?? 0
         nowPlayingStylePopup.selectItem(at: index)
+    }
+
+    func configureAudioReactor(_ preferences: AudioReactorPreferences) {
+        audioReactorPreferences = clamped(preferences)
+        syncAudioReactorControls()
+        rebuildParameterControls()
     }
 
     func reloadDisplays() {
@@ -126,6 +142,7 @@ final class LibraryWindowController: NSWindowController {
         buttonRow.addArrangedSubview(NSButton(title: "Export", target: self, action: #selector(exportPackage)))
         stack.addArrangedSubview(buttonRow)
 
+        configureAudioReactorControls()
         buildNowPlayingSection(in: stack)
     }
 
@@ -166,7 +183,7 @@ final class LibraryWindowController: NSWindowController {
         stack.addArrangedSubview(labeled("Keep visible while paused", control: nowPlayingKeepVisibleSwitch))
     }
 
-    private func labeled(_ title: String, control: NSControl) -> NSStackView {
+    private func labeled(_ title: String, control: NSView) -> NSStackView {
         let label = NSTextField(labelWithString: title)
         label.widthAnchor.constraint(equalToConstant: 150).isActive = true
 
@@ -235,6 +252,127 @@ final class LibraryWindowController: NSWindowController {
             controlsByParameterID[parameter.id] = control
             parameterStack.addArrangedSubview(labeledRow(label: parameter.name, view: control))
         }
+
+        buildAudioReactorSection(for: package)
+    }
+
+    private func buildAudioReactorSection(for package: LunoPackageRecord) {
+        let heading = NSTextField(labelWithString: "Audio Reactor")
+        heading.font = .boldSystemFont(ofSize: 13)
+        parameterStack.addArrangedSubview(heading)
+
+        guard packageDeclaresAudioBindings(package) else {
+            let unavailable = NSTextField(labelWithString: "Unavailable for this wallpaper.")
+            unavailable.textColor = .secondaryLabelColor
+            unavailable.isEnabled = false
+            parameterStack.addArrangedSubview(labeled("Audio Reactor", control: unavailable))
+            syncAudioReactorControls()
+            return
+        }
+
+        parameterStack.addArrangedSubview(labeled("Audio Reactor", control: audioReactorEnableSwitch))
+        parameterStack.addArrangedSubview(labeled("Intensity", control: audioReactorIntensitySlider))
+        parameterStack.addArrangedSubview(labeled("Response", control: audioReactorResponseControl))
+        parameterStack.addArrangedSubview(labeled("Bass Pulse", control: audioReactorBassPulseSlider))
+
+        let visualizerRow = NSStackView(views: [
+            labeledSwitch("Pulse Ring", audioReactorPulseRingSwitch),
+            labeledSwitch("Spectrum Bars", audioReactorSpectrumBarsSwitch),
+            labeledSwitch("Wave Line", audioReactorWaveLineSwitch)
+        ])
+        visualizerRow.orientation = .horizontal
+        visualizerRow.alignment = .centerY
+        visualizerRow.spacing = 14
+        parameterStack.addArrangedSubview(labeled("Visualizer", control: visualizerRow))
+        parameterStack.addArrangedSubview(labeled("Overlay Opacity", control: audioReactorOverlayOpacitySlider))
+
+        syncAudioReactorControls()
+    }
+
+    private func configureAudioReactorControls() {
+        let controls: [NSControl] = [
+            audioReactorEnableSwitch,
+            audioReactorIntensitySlider,
+            audioReactorResponseControl,
+            audioReactorBassPulseSlider,
+            audioReactorPulseRingSwitch,
+            audioReactorSpectrumBarsSwitch,
+            audioReactorWaveLineSwitch,
+            audioReactorOverlayOpacitySlider
+        ]
+        controls.forEach { $0.target = self }
+
+        audioReactorEnableSwitch.action = #selector(audioReactorEnabledChanged)
+        audioReactorIntensitySlider.action = #selector(audioReactorIntensityChanged)
+        audioReactorResponseControl.action = #selector(audioReactorResponseChanged)
+        audioReactorBassPulseSlider.action = #selector(audioReactorBassPulseChanged)
+        audioReactorPulseRingSwitch.action = #selector(audioReactorPulseRingChanged)
+        audioReactorSpectrumBarsSwitch.action = #selector(audioReactorSpectrumBarsChanged)
+        audioReactorWaveLineSwitch.action = #selector(audioReactorWaveLineChanged)
+        audioReactorOverlayOpacitySlider.action = #selector(audioReactorOverlayOpacityChanged)
+
+        audioReactorIntensitySlider.isContinuous = true
+        audioReactorBassPulseSlider.isContinuous = true
+        audioReactorOverlayOpacitySlider.isContinuous = true
+        audioReactorIntensitySlider.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        audioReactorResponseControl.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        audioReactorBassPulseSlider.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        audioReactorOverlayOpacitySlider.widthAnchor.constraint(equalToConstant: 220).isActive = true
+    }
+
+    private func labeledSwitch(_ title: String, _ control: NSSwitch) -> NSStackView {
+        let label = NSTextField(labelWithString: title)
+        let row = NSStackView(views: [control, label])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 6
+        return row
+    }
+
+    private func packageDeclaresAudioBindings(_ package: LunoPackageRecord?) -> Bool {
+        guard let package else { return false }
+        return !package.manifest.audioBindings.isEmpty
+    }
+
+    private func syncAudioReactorControls() {
+        let hasAudioBindings = packageDeclaresAudioBindings(selectedPackage)
+        audioReactorEnableSwitch.state = audioReactorPreferences.isEnabled ? .on : .off
+        audioReactorIntensitySlider.doubleValue = AudioReactorPreferences.clamp(audioReactorPreferences.intensity)
+        audioReactorResponseControl.selectedSegment = AudioReactorResponse.allCases.firstIndex(of: audioReactorPreferences.response) ?? 0
+        audioReactorBassPulseSlider.doubleValue = AudioReactorPreferences.clamp(audioReactorPreferences.bassPulseStrength)
+        audioReactorPulseRingSwitch.state = audioReactorPreferences.showsPulseRing ? .on : .off
+        audioReactorSpectrumBarsSwitch.state = audioReactorPreferences.showsSpectrumBars ? .on : .off
+        audioReactorWaveLineSwitch.state = audioReactorPreferences.showsWaveLine ? .on : .off
+        audioReactorOverlayOpacitySlider.doubleValue = AudioReactorPreferences.clamp(audioReactorPreferences.overlayOpacity)
+
+        let controlsEnabled = hasAudioBindings && audioReactorPreferences.isEnabled
+        audioReactorEnableSwitch.isEnabled = hasAudioBindings
+        audioReactorIntensitySlider.isEnabled = controlsEnabled
+        audioReactorResponseControl.isEnabled = controlsEnabled
+        audioReactorBassPulseSlider.isEnabled = controlsEnabled
+        audioReactorPulseRingSwitch.isEnabled = controlsEnabled
+        audioReactorSpectrumBarsSwitch.isEnabled = controlsEnabled
+        audioReactorWaveLineSwitch.isEnabled = controlsEnabled
+        audioReactorOverlayOpacitySlider.isEnabled = controlsEnabled
+    }
+
+    private func clamped(_ preferences: AudioReactorPreferences) -> AudioReactorPreferences {
+        AudioReactorPreferences(
+            isEnabled: preferences.isEnabled,
+            intensity: AudioReactorPreferences.clamp(preferences.intensity),
+            response: preferences.response,
+            bassPulseStrength: AudioReactorPreferences.clamp(preferences.bassPulseStrength),
+            showsPulseRing: preferences.showsPulseRing,
+            showsSpectrumBars: preferences.showsSpectrumBars,
+            showsWaveLine: preferences.showsWaveLine,
+            overlayOpacity: AudioReactorPreferences.clamp(preferences.overlayOpacity)
+        )
+    }
+
+    private func notifyAudioReactorPreferencesChanged() {
+        audioReactorPreferences = clamped(audioReactorPreferences)
+        syncAudioReactorControls()
+        delegate?.libraryWindow(self, didChange: audioReactorPreferences)
     }
 
     private func makeControl(for parameter: WallpaperParameterDefinition, value: ParameterValue) -> NSControl {
@@ -290,6 +428,49 @@ final class LibraryWindowController: NSWindowController {
 
     @objc private func packageSelectionChanged() {
         rebuildParameterControls()
+    }
+
+    @objc private func audioReactorEnabledChanged(_ sender: NSSwitch) {
+        audioReactorPreferences.isEnabled = sender.state == .on
+        notifyAudioReactorPreferencesChanged()
+    }
+
+    @objc private func audioReactorIntensityChanged(_ sender: NSSlider) {
+        audioReactorPreferences.intensity = AudioReactorPreferences.clamp(sender.doubleValue)
+        notifyAudioReactorPreferencesChanged()
+    }
+
+    @objc private func audioReactorResponseChanged(_ sender: NSSegmentedControl) {
+        let responses = AudioReactorResponse.allCases
+        guard responses.indices.contains(sender.selectedSegment) else { return }
+
+        audioReactorPreferences.response = responses[sender.selectedSegment]
+        notifyAudioReactorPreferencesChanged()
+    }
+
+    @objc private func audioReactorBassPulseChanged(_ sender: NSSlider) {
+        audioReactorPreferences.bassPulseStrength = AudioReactorPreferences.clamp(sender.doubleValue)
+        notifyAudioReactorPreferencesChanged()
+    }
+
+    @objc private func audioReactorPulseRingChanged(_ sender: NSSwitch) {
+        audioReactorPreferences.showsPulseRing = sender.state == .on
+        notifyAudioReactorPreferencesChanged()
+    }
+
+    @objc private func audioReactorSpectrumBarsChanged(_ sender: NSSwitch) {
+        audioReactorPreferences.showsSpectrumBars = sender.state == .on
+        notifyAudioReactorPreferencesChanged()
+    }
+
+    @objc private func audioReactorWaveLineChanged(_ sender: NSSwitch) {
+        audioReactorPreferences.showsWaveLine = sender.state == .on
+        notifyAudioReactorPreferencesChanged()
+    }
+
+    @objc private func audioReactorOverlayOpacityChanged(_ sender: NSSlider) {
+        audioReactorPreferences.overlayOpacity = AudioReactorPreferences.clamp(sender.doubleValue)
+        notifyAudioReactorPreferencesChanged()
     }
 
     @objc private func applySelectedPackage() {
