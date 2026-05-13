@@ -117,10 +117,12 @@ public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStream
             return
         }
 
-        _ = blockBuffer
         let count = Int(audioBufferList.mBuffers.mDataByteSize) / MemoryLayout<Float>.stride
         let pointer = data.assumingMemoryBound(to: Float.self)
-        body(UnsafeBufferPointer(start: pointer, count: count))
+        let buffer = UnsafeBufferPointer(start: pointer, count: count)
+        withExtendedLifetime(blockBuffer) {
+            body(buffer)
+        }
     }
 }
 #endif
