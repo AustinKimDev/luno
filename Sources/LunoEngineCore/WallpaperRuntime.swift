@@ -26,7 +26,7 @@ public enum WallpaperRuntimeError: Error, LocalizedError {
 @MainActor
 public final class WallpaperRuntime {
     private var controllers: [CGDirectDisplayID: WallpaperWindowController] = [:]
-    private var spaceChangeObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var spaceChangeObserver: NSObjectProtocol?
 
     public init() {
         spaceChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
