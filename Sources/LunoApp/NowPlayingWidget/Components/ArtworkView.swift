@@ -27,8 +27,12 @@ struct ArtworkView: View {
         }
         .scaleEffect(animatedScale)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .shadow(
+            color: .white.opacity(min(max(pulseAmplitude, 0), 1) * 0.18),
+            radius: min(max(pulseAmplitude, 0), 1) * 10
+        )
         .onChange(of: pulseAmplitude) { _, newValue in
-            let target = 1.0 + min(max(newValue, 0), 1) * 0.03
+            let target = 1.0 + min(max(newValue, 0), 1) * 0.08
             withAnimation(.spring(response: 0.18, dampingFraction: 0.6)) {
                 animatedScale = target
             }

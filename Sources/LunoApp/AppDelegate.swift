@@ -267,7 +267,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
     }
 
     private func reconcileAudioCaptureState() {
-        if anyActivePackageNeedsAudio() {
+        let nowPlayingNeedsAudio = nowPlayingViewModel != nil && nowPlayingPreferences.audioReactivityEnabled
+        if anyActivePackageNeedsAudio() || nowPlayingNeedsAudio {
             startAudioCaptureIfAvailable()
         } else {
             stopAudioCaptureIfRunning()
@@ -422,6 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         nowPlayingWindowController = windowController
         viewModel.start()
         windowController.show()
+        reconcileAudioCaptureState()
     }
 
     private func stopNowPlaying() {
@@ -434,6 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         appleMusicProvider = nil
         spotifyProvider = nil
         mediaRemoteProvider = nil
+        reconcileAudioCaptureState()
     }
 
     private func updateNowPlaying(preferences: NowPlayingPreferences) {
@@ -448,6 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         } else if !preferences.isEnabled && wasEnabled {
             stopNowPlaying()
         }
+        reconcileAudioCaptureState()
     }
 }
 
