@@ -57,6 +57,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <true/>
   <key>NSScreenCaptureUsageDescription</key>
   <string>Luno captures system audio to drive audio-reactive live backgrounds.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Luno reads the currently playing track from Music and Spotify so the wallpaper widget can show what you're listening to.</string>
 </dict>
 </plist>
 PLIST

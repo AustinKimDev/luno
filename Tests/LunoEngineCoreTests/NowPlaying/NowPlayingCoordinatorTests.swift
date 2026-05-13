@@ -1,0 +1,95 @@
+import XCTest
+@testable import LunoEngineCore
+
+final class NowPlayingCoordinatorTests: XCTestCase {
+    func testEmitsTrackFromOnlyPlayingProvider() async throws {
+        let clock = FakeNowPlayingClock(start: Date(timeIntervalSince1970: 1_000))
+        let spotify = MockNowPlayingProvider(source: .spotify)
+        let coordinator = NowPlayingCoordinator(providers: [spotify], clock: clock)
+
+        var iterator = coordinator.tracks.makeAsyncIterator()
+        await coordinator.start()
+
+        let track = NowPlayingTrack.fixture(source: .spotify, updatedAt: clock.now())
+        spotify.emit(track)
+
+        let received = await iterator.next() ?? nil
+        XCTAssertEqual(received, track)
+
+        await coordinator.stop()
+        XCTAssertEqual(spotify.stopCount, 1)
+    }
+
+    func testAppleMusicWinsOverSpotifyWhenBothPlaying() async throws {
+        let clock = FakeNowPlayingClock(start: Date(timeIntervalSince1970: 1_000))
+        let am = MockNowPlayingProvider(source: .appleMusic)
+        let sp = MockNowPlayingProvider(source: .spotify)
+        let coordinator = NowPlayingCoordinator(providers: [am, sp], clock: clock)
+
+        var iterator = coordinator.tracks.makeAsyncIterator()
+        await coordinator.start()
+
+        let spotifyTrack = NowPlayingTrack.fixture(title: "Spotify Song", source: .spotify, updatedAt: clock.now())
+        sp.emit(spotifyTrack)
+        let first = await iterator.next() ?? nil
+        XCTAssertEqual(first?.title, "Spotify Song")
+
+        let amTrack = NowPlayingTrack.fixture(title: "Apple Music Song", source: .appleMusic, updatedAt: clock.now())
+        am.emit(amTrack)
+        let second = await iterator.next() ?? nil
+        XCTAssertEqual(second?.title, "Apple Music Song")
+
+        await coordinator.stop()
+    }
+
+    func testEmitsNilWhenNoProviderIsPlaying() async throws {
+        let clock = FakeNowPlayingClock(start: Date(timeIntervalSince1970: 1_000))
+        let am = MockNowPlayingProvider(source: .appleMusic)
+        let coordinator = NowPlayingCoordinator(providers: [am], clock: clock)
+
+        var iterator = coordinator.tracks.makeAsyncIterator()
+        await coordinator.start()
+
+        let playing = NowPlayingTrack.fixture(source: .appleMusic, isPlaying: true, updatedAt: clock.now())
+        am.emit(playing)
+        _ = await iterator.next()
+
+        let paused = NowPlayingTrack.fixture(source: .appleMusic, isPlaying: false, updatedAt: clock.now())
+        am.emit(paused)
+        let after = await iterator.next() ?? nil
+        XCTAssertNil(after)
+
+        await coordinator.stop()
+    }
+
+    func testHigherPriorityProviderKeepsHoldWithinWindow() async throws {
+        let clock = FakeNowPlayingClock(start: Date(timeIntervalSince1970: 1_000))
+        let am = MockNowPlayingProvider(source: .appleMusic)
+        let sp = MockNowPlayingProvider(source: .spotify)
+        let coordinator = NowPlayingCoordinator(
+            providers: [am, sp],
+            clock: clock,
+            priorityHoldSeconds: 2.0
+        )
+
+        var iterator = coordinator.tracks.makeAsyncIterator()
+        await coordinator.start()
+
+        let amTrack = NowPlayingTrack.fixture(title: "AM", source: .appleMusic, updatedAt: clock.now())
+        am.emit(amTrack)
+        _ = await iterator.next()
+
+        clock.advance(by: 1)
+        let spTrack = NowPlayingTrack.fixture(title: "SP", source: .spotify, updatedAt: clock.now())
+        sp.emit(spTrack)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        clock.advance(by: 1.5)
+        let spTrack2 = NowPlayingTrack.fixture(title: "SP-late", source: .spotify, updatedAt: clock.now())
+        sp.emit(spTrack2)
+        let received = await iterator.next() ?? nil
+        XCTAssertEqual(received?.title, "SP-late")
+
+        await coordinator.stop()
+    }
+}
