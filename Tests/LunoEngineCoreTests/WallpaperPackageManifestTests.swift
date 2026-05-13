@@ -80,4 +80,15 @@ final class WallpaperPackageManifestTests: XCTestCase {
             XCTAssertNotNil(library.makeFunction(name: "lunoFragment"))
         }
     }
+
+    func testBuiltInOverlayShaderCompiles() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("Metal is not available on this Mac.")
+        }
+
+        let library = try device.makeLibrary(source: LunoOverlayShaderSource.source, options: nil)
+
+        XCTAssertNotNil(library.makeFunction(name: "lunoOverlayVertex"))
+        XCTAssertNotNil(library.makeFunction(name: "lunoOverlayFragment"))
+    }
 }
