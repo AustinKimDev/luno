@@ -261,10 +261,11 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
 
     private let commandQueue: any MTLCommandQueue
     private let pipelineState: any MTLRenderPipelineState
-    private let overlayPipelineState: any MTLRenderPipelineState
+    private let overlayPipelineState: (any MTLRenderPipelineState)?
     private let startTime = CACurrentMediaTime()
     private var lastTime = CACurrentMediaTime()
     private var viewportSize = SIMD2<Float>(1, 1)
+    private var overlaySpectrum = Array(repeating: Float(0), count: MetalWallpaperRenderer.overlayBarCount)
     private let displayScale: Float
     private let parameterPack: ShaderParameterPack
     private let backgroundTexture: (any MTLTexture)?
@@ -341,7 +342,9 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
             descriptor.fragmentFunction = fragment
             descriptor.colorAttachments[0].pixelFormat = view.colorPixelFormat
             pipelineState = try device.makeRenderPipelineState(descriptor: descriptor)
-            overlayPipelineState = try Self.makeOverlayPipelineState(device: device, colorPixelFormat: view.colorPixelFormat)
+            overlayPipelineState = usesAudioReactor
+                ? try Self.makeOverlayPipelineState(device: device, colorPixelFormat: view.colorPixelFormat)
+                : nil
         } catch let runtimeError as WallpaperRuntimeError {
             throw runtimeError
         } catch {
@@ -368,7 +371,7 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         let now = CACurrentMediaTime()
         let rawAudio = audioProvider()
         let audioReactorPreferences = audioReactorPreferencesProvider()
-        let audio = usesAudioReactor ? audioReactorPreferences.shaped(rawAudio) : rawAudio
+        let audio = usesAudioReactor ? shapedScalars(rawAudio, preferences: audioReactorPreferences) : rawAudio.scalars
         var uniforms = LunoShaderUniforms(
             time: Float(now - startTime),
             deltaTime: Float(now - lastTime),
@@ -396,7 +399,10 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         }
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
-        if usesAudioReactor && audioReactorPreferences.shouldDrawOverlay {
+        if usesAudioReactor,
+           audioReactorPreferences.shouldDrawOverlay,
+           let overlayPipelineState {
+            downsampleShapedSpectrum(rawAudio.spectrum, preferences: audioReactorPreferences)
             var overlayUniforms = LunoOverlayUniforms(
                 resolution: viewportSize,
                 rms: audio.rms,
@@ -408,11 +414,10 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
                 flags: audioReactorPreferences.overlayFlags,
                 barCount: UInt32(Self.overlayBarCount)
             )
-            let spectrum = AudioReactorPreferences.downsampleSpectrum(audio.spectrum, count: Self.overlayBarCount)
 
             encoder.setRenderPipelineState(overlayPipelineState)
             encoder.setFragmentBytes(&overlayUniforms, length: MemoryLayout<LunoOverlayUniforms>.stride, index: 0)
-            spectrum.withUnsafeBufferPointer { buffer in
+            overlaySpectrum.withUnsafeBufferPointer { buffer in
                 if let baseAddress = buffer.baseAddress {
                     encoder.setFragmentBytes(baseAddress, length: MemoryLayout<Float>.stride * buffer.count, index: 1)
                 }
@@ -423,6 +428,46 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
 
         commandBuffer.present(drawable)
         commandBuffer.commit()
+    }
+
+    private func shapedScalars(
+        _ features: AudioFeatures,
+        preferences: AudioReactorPreferences
+    ) -> AudioScalars {
+        guard preferences.isEnabled else { return .silent }
+        return AudioScalars(
+            rms: preferences.shaped(features.rms),
+            bass: preferences.shaped(features.bass),
+            mid: preferences.shaped(features.mid),
+            treble: preferences.shaped(features.treble)
+        )
+    }
+
+    private func downsampleShapedSpectrum(
+        _ spectrum: [Float],
+        preferences: AudioReactorPreferences
+    ) {
+        guard !spectrum.isEmpty else {
+            overlaySpectrum.withUnsafeMutableBufferPointer { buffer in
+                for index in buffer.indices {
+                    buffer[index] = 0
+                }
+            }
+            return
+        }
+
+        overlaySpectrum.withUnsafeMutableBufferPointer { buffer in
+            for index in buffer.indices {
+                let start = index * spectrum.count / buffer.count
+                let end = max(start + 1, (index + 1) * spectrum.count / buffer.count)
+                var total: Float = 0
+                let clampedEnd = min(end, spectrum.count)
+                for spectrumIndex in start..<clampedEnd {
+                    total += preferences.shaped(spectrum[spectrumIndex])
+                }
+                buffer[index] = total / Float(clampedEnd - start)
+            }
+        }
     }
 
     private static func makeOverlayPipelineState(
