@@ -128,11 +128,11 @@ final class LibraryWindowController: NSWindowController {
             documentView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
             documentView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
             documentView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            documentView.bottomAnchor.constraint(equalTo: scrollView.contentView.bottomAnchor),
             documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            documentView.heightAnchor.constraint(greaterThanOrEqualTo: scrollView.contentView.heightAnchor),
 
             stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: documentView.trailingAnchor, constant: -20),
+            stack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -20),
             stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 20),
             stack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -20)
         ])
