@@ -62,6 +62,27 @@ final class AudioReactorPreferencesTests: XCTestCase {
         XCTAssertEqual(shaped.spectrum, [0, shaped.spectrum[1], 1])
     }
 
+    func testShapingMapsNonFiniteValuesToSafeZeros() {
+        let features = AudioFeatures(
+            rms: .nan,
+            bass: .infinity,
+            mid: -.infinity,
+            treble: 0.5,
+            spectrum: [.nan, .infinity, -.infinity, 0.25]
+        )
+        let shaped = AudioReactorPreferences.defaults.shaped(features)
+
+        XCTAssertEqual(shaped.rms, 0)
+        XCTAssertEqual(shaped.bass, 0)
+        XCTAssertEqual(shaped.mid, 0)
+        XCTAssertTrue(shaped.treble.isFinite)
+        XCTAssertEqual(shaped.spectrum[0], 0)
+        XCTAssertEqual(shaped.spectrum[1], 0)
+        XCTAssertEqual(shaped.spectrum[2], 0)
+        XCTAssertTrue(shaped.spectrum[3].isFinite)
+        XCTAssertTrue(shaped.spectrum.allSatisfy(\.isFinite))
+    }
+
     func testDownsamplesSpectrumByAveragingBuckets() {
         let spectrum: [Float] = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 0.5, 0.25]
 

@@ -96,24 +96,21 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
     }
 
     public static func clamp(_ value: Double) -> Double {
-        min(max(value, 0), 1)
+        guard value.isFinite else { return 0 }
+        return min(max(value, 0), 1)
     }
 
     public static func clamp(_ value: Float) -> Float {
-        min(max(value, 0), 1)
+        guard value.isFinite else { return 0 }
+        return min(max(value, 0), 1)
     }
 }
 
 public struct AudioReactorPreferencesStore: Sendable {
     private let fileURL: URL
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
 
     public init(fileURL: URL) {
         self.fileURL = fileURL
-        self.encoder = JSONEncoder()
-        self.encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        self.decoder = JSONDecoder()
     }
 
     public func load() throws -> AudioReactorPreferences {
@@ -122,12 +119,14 @@ public struct AudioReactorPreferencesStore: Sendable {
         }
 
         let data = try Data(contentsOf: fileURL)
-        return try decoder.decode(AudioReactorPreferences.self, from: data)
+        return try JSONDecoder().decode(AudioReactorPreferences.self, from: data)
     }
 
     public func save(_ preferences: AudioReactorPreferences) throws {
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(preferences)
         try data.write(to: fileURL, options: .atomic)
     }
