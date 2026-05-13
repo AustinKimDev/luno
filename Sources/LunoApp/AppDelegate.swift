@@ -4,14 +4,14 @@ import LunoEngineCore
 import ServiceManagement
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControllerDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, SettingsWindowControllerDelegate {
     private let runtime = WallpaperRuntime()
     private let archiveService = PackageArchiveService()
     private var statusItem: NSStatusItem?
     private var library: LocalPackageLibrary?
     private var presetStore: PresetStore?
     private var assignmentStore: DisplayAssignmentStore?
-    private var libraryWindowController: LibraryWindowController?
+    private var settingsWindowController: SettingsWindowController?
     private var packages: [LunoPackageRecord] = []
     private var presets: [WallpaperPreset] = []
     private var performancePolicy = PerformancePolicy.balanced
@@ -42,6 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
             let audioReactorStore = AudioReactorPreferencesStore(fileURL: paths.audioReactorPreferences)
             audioReactorPreferencesStore = audioReactorStore
             audioReactorPreferences = (try? audioReactorStore.load()) ?? .defaults
+            runtime.renderingStateDidChange = { [weak self] in
+                self?.reconcileAudioCaptureState()
+            }
             let nowPlayingStore = NowPlayingPreferencesStore(fileURL: paths.nowPlayingPreferences)
             nowPlayingPreferencesStore = nowPlayingStore
             nowPlayingPreferences = (try? nowPlayingStore.load()) ?? .defaults
@@ -139,21 +142,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
     private func reloadLibraryState() throws {
         packages = try library?.packages() ?? []
         presets = try presetStore?.load() ?? []
-        libraryWindowController?.configure(packages: packages, presets: presets)
+        settingsWindowController?.configure(packages: packages, presets: presets)
     }
 
     private func showLibrary() {
-        if libraryWindowController == nil {
-            let controller = LibraryWindowController()
+        if settingsWindowController == nil {
+            let controller = SettingsWindowController()
             controller.delegate = self
-            libraryWindowController = controller
+            settingsWindowController = controller
         }
 
-        libraryWindowController?.configure(packages: packages, presets: presets)
-        libraryWindowController?.configureAudioReactor(audioReactorPreferences)
-        libraryWindowController?.configureNowPlaying(nowPlayingPreferences)
-        libraryWindowController?.showWindow(nil)
-        libraryWindowController?.window?.makeKeyAndOrderFront(nil)
+        settingsWindowController?.configure(packages: packages, presets: presets)
+        settingsWindowController?.configureAudioReactor(audioReactorPreferences)
+        settingsWindowController?.configureNowPlaying(nowPlayingPreferences)
+        settingsWindowController?.showWindow(nil)
+        settingsWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -186,6 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
             preset: preset,
             displayID: displayID,
             frameRate: decision.frameRate,
+            pauseWhenOccluded: performancePolicy.pausesWhenNotVisible,
             audioProvider: { [weak self] in
                 self?.audioFeatures ?? .silent
             },
@@ -262,12 +266,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         }
     }
 
-    private func anyActivePackageNeedsAudioReactor() -> Bool {
+    private func anyRenderingPackageNeedsAudioReactor() -> Bool {
         guard audioReactorPreferences.isEnabled else { return false }
         guard let assignmentStore else { return false }
         let assignments = (try? assignmentStore.load()) ?? []
-        let activeDisplayIDs = Set(runtime.activeDisplayIDs.map(String.init))
-        for assignment in assignments where activeDisplayIDs.contains(assignment.displayID) {
+        let renderingDisplayIDs = Set(runtime.renderingDisplayIDs.map(String.init))
+        for assignment in assignments where renderingDisplayIDs.contains(assignment.displayID) {
             guard let package = packages.first(where: { $0.manifest.id == assignment.packageID }) else { continue }
             if !package.manifest.audioBindings.isEmpty { return true }
         }
@@ -276,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
 
     private func reconcileAudioCaptureState() {
         let nowPlayingNeedsAudio = nowPlayingViewModel != nil && nowPlayingPreferences.audioReactivityEnabled
-        if anyActivePackageNeedsAudioReactor() || nowPlayingNeedsAudio {
+        if anyRenderingPackageNeedsAudioReactor() || nowPlayingNeedsAudio {
             startAudioCaptureIfAvailable()
         } else {
             stopAudioCaptureIfRunning()
@@ -312,7 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
 
     @objc private func screenParametersDidChange() {
         runtime.refreshDisplayLayout()
-        libraryWindowController?.reloadDisplays()
+        settingsWindowController?.reloadDisplays()
     }
 
     @objc private func systemWillSleep() {
@@ -325,7 +329,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         startNowPlaying()
     }
 
-    func libraryWindowDidRequestImport(_ controller: LibraryWindowController) {
+    func settingsWindowDidRequestImport(_ controller: SettingsWindowController) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
@@ -341,7 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         }
     }
 
-    func libraryWindow(_ controller: LibraryWindowController, didRequestExport package: LunoPackageRecord) {
+    func settingsWindow(_ controller: SettingsWindowController, didRequestExport package: LunoPackageRecord) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "\(package.manifest.name).luno"
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -353,8 +357,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         }
     }
 
-    func libraryWindow(
-        _ controller: LibraryWindowController,
+    func settingsWindow(
+        _ controller: SettingsWindowController,
         didRequestApply package: LunoPackageRecord,
         preset: WallpaperPreset?,
         displayID: CGDirectDisplayID?
@@ -366,7 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         }
     }
 
-    func libraryWindow(_ controller: LibraryWindowController, didSave preset: WallpaperPreset) {
+    func settingsWindow(_ controller: SettingsWindowController, didSave preset: WallpaperPreset) {
         do {
             presets.removeAll { $0.id == preset.id && $0.packageID == preset.packageID }
             presets.append(preset)
@@ -377,12 +381,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         }
     }
 
-    func libraryWindow(_ controller: LibraryWindowController, didChange nowPlayingPreferences: NowPlayingPreferences) {
+    func settingsWindow(_ controller: SettingsWindowController, didChange nowPlayingPreferences: NowPlayingPreferences) {
         updateNowPlaying(preferences: nowPlayingPreferences)
     }
 
-    func libraryWindow(
-        _ controller: LibraryWindowController,
+    func settingsWindow(
+        _ controller: SettingsWindowController,
         didChange audioReactorPreferences: AudioReactorPreferences,
         shouldPersist: Bool
     ) {
@@ -420,7 +424,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         )
         viewModel.onPreferencesChanged = { [weak self] preferences in
             self?.nowPlayingPreferences = preferences
-            self?.libraryWindowController?.configureNowPlaying(preferences)
+            self?.settingsWindowController?.configureNowPlaying(preferences)
         }
         viewModel.controlSender = { [weak self] command, source in
             guard let self else { return }
