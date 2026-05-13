@@ -42,7 +42,7 @@ struct CompactBarStyle: View {
                 HoverControlsView(layout: .horizontalRight, canSkip: true, enabled: canControl, onCommand: onCommand)
             }
         }
-        .padding(10)
+        .padding(CGFloat(appearance.padding))
     }
 
     private var secondaryLine: String? {

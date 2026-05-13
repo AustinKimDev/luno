@@ -46,7 +46,7 @@ struct AlbumDominantStyle: View {
             }
             .frame(width: 152, alignment: .leading)
         }
-        .padding(14)
+        .padding(CGFloat(appearance.padding))
     }
 
     private var secondaryLine: String? {

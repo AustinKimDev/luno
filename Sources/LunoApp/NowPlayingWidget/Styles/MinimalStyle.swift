@@ -33,6 +33,6 @@ struct MinimalStyle: View {
                 HoverControlsView(layout: .singleRight, canSkip: false, enabled: canControl, onCommand: onCommand)
             }
         }
-        .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+        .padding(EdgeInsets(top: CGFloat(appearance.padding), leading: CGFloat(appearance.padding), bottom: CGFloat(appearance.padding), trailing: CGFloat(appearance.padding)))
     }
 }
