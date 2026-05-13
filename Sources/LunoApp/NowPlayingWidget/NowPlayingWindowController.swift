@@ -136,7 +136,9 @@ final class NowPlayingWindowController: NSWindowController {
     }
 
     func saveCurrentPosition() {
-        guard let window, let screen = window.screen else { return }
+        guard let window else { return }
+        let screen = NSScreen.lunoScreen(containing: window.frame.center) ?? window.screen
+        guard let screen else { return }
         let displayID = screen.lunoDisplayID.map { String($0) } ?? "main"
         var preferences = viewModel.preferences
         preferences.positionsByDisplay[displayID] = NowPlayingPreferences.Position(
@@ -161,11 +163,21 @@ final class NowPlayingWindowController: NSWindowController {
             x: dragStartFrame.origin.x + mouseLocation.x - dragStartMouseLocation.x,
             y: dragStartFrame.origin.y + mouseLocation.y - dragStartMouseLocation.y
         )
-        let screenFrame = window.screen?.visibleFrame
+        let targetFrame = NSRect(origin: target, size: dragStartFrame.size)
+        let targetScreen = NSScreen.lunoScreen(containing: mouseLocation)
+            ?? NSScreen.lunoScreen(containing: targetFrame.center)
+            ?? window.screen
+        let screenFrame = targetScreen?.visibleFrame
             ?? NSScreen.main?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let clamped = clampWindowOrigin(point: target, size: dragStartFrame.size, into: screenFrame)
-        window.setFrameOrigin(clamped)
+        if let floatingWindow = window as? NowPlayingFloatingWindow {
+            floatingWindow.constraintScreenOverride = targetScreen
+            window.setFrameOrigin(clamped)
+            floatingWindow.constraintScreenOverride = nil
+        } else {
+            window.setFrameOrigin(clamped)
+        }
     }
 
     func endWidgetDrag() {
@@ -189,10 +201,13 @@ final class NowPlayingWindowController: NSWindowController {
     private func applySavedPosition() {
         guard let window else { return }
 
-        let visibleFrame = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
-            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let displayIDs = NSScreen.screens.compactMap(\.lunoDisplayID).map(String.init)
         let preferredDisplayID = displayIDs.first { viewModel.preferences.positionsByDisplay[$0] != nil }
+        let targetScreen = preferredDisplayID.flatMap(NSScreen.lunoScreen(displayID:))
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        let visibleFrame = targetScreen?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let windowSize = viewModel.preferences.style.windowSize
         let widgetSize = viewModel.preferences.style.widgetSize
         let margin = NowPlayingPreferences.Style.glowMargin
@@ -226,12 +241,16 @@ final class NowPlayingWindowController: NSWindowController {
 @MainActor
 private final class NowPlayingFloatingWindow: NSPanel {
     var contentEdgeInset: CGFloat = 0
+    var constraintScreenOverride: NSScreen?
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
-        let screenFrame = screen?.visibleFrame ?? screen?.frame ?? frameRect
+        let targetScreen = constraintScreenOverride
+            ?? NSScreen.lunoScreen(containing: frameRect.center)
+            ?? screen
+        let screenFrame = targetScreen?.visibleFrame ?? targetScreen?.frame ?? frameRect
         let minX = screenFrame.minX - contentEdgeInset
         let maxX = screenFrame.maxX - frameRect.width + contentEdgeInset
         let minY = screenFrame.minY - contentEdgeInset
@@ -240,6 +259,24 @@ private final class NowPlayingFloatingWindow: NSPanel {
         constrained.origin.x = min(max(frameRect.origin.x, minX), maxX)
         constrained.origin.y = min(max(frameRect.origin.y, minY), maxY)
         return constrained
+    }
+}
+
+private extension NSRect {
+    var center: NSPoint {
+        NSPoint(x: midX, y: midY)
+    }
+}
+
+private extension NSScreen {
+    static func lunoScreen(containing point: NSPoint) -> NSScreen? {
+        screens.first { $0.frame.contains(point) }
+    }
+
+    static func lunoScreen(displayID: String) -> NSScreen? {
+        screens.first { screen in
+            screen.lunoDisplayID.map(String.init) == displayID
+        }
     }
 }
 
