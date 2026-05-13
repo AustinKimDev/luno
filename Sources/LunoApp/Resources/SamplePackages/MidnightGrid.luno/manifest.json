@@ -1,0 +1,52 @@
+{
+  "id": "com.luno.samples.midnight-grid",
+  "name": "Midnight Grid",
+  "version": "1.0.0",
+  "engineVersion": "1.0",
+  "author": "Luno",
+  "entryShader": "MidnightGrid.metal",
+  "assets": [],
+  "parameters": [
+    {
+      "id": "speed",
+      "name": "Speed",
+      "type": "float",
+      "default": 0.65,
+      "min": 0.1,
+      "max": 2.0
+    },
+    {
+      "id": "tintStrength",
+      "name": "Tint Strength",
+      "type": "float",
+      "default": 0.15,
+      "min": 0.0,
+      "max": 1.0
+    },
+    {
+      "id": "brightness",
+      "name": "Brightness",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.35,
+      "max": 1.8
+    },
+    {
+      "id": "saturation",
+      "name": "Saturation",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 1.8
+    },
+    {
+      "id": "tint",
+      "name": "Tint",
+      "type": "color",
+      "default": "#40CFFF"
+    }
+  ],
+  "audioBindings": ["rms", "bass", "mid", "treble"],
+  "preview": "preview.png",
+  "tags": ["shader", "audio", "sample"]
+}

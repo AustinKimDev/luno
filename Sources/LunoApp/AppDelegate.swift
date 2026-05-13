@@ -1,0 +1,315 @@
+import AppKit
+import CoreGraphics
+import LunoEngineCore
+import ServiceManagement
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControllerDelegate {
+    private let runtime = WallpaperRuntime()
+    private let archiveService = PackageArchiveService()
+    private var statusItem: NSStatusItem?
+    private var library: LocalPackageLibrary?
+    private var presetStore: PresetStore?
+    private var assignmentStore: DisplayAssignmentStore?
+    private var libraryWindowController: LibraryWindowController?
+    private var packages: [LunoPackageRecord] = []
+    private var presets: [WallpaperPreset] = []
+    private var performancePolicy = PerformancePolicy.balanced
+    @available(macOS 15.0, *)
+    private var audioCapture: SystemAudioCaptureService?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        do {
+            let paths = try LunoAppPaths.default()
+            try FileManager.default.createDirectory(at: paths.packages, withIntermediateDirectories: true)
+
+            library = LocalPackageLibrary(libraryURL: paths.packages, archiveService: archiveService)
+            presetStore = PresetStore(fileURL: paths.presets)
+            assignmentStore = DisplayAssignmentStore(fileURL: paths.assignments)
+
+            try installBundledSamplesIfNeeded()
+            try reloadLibraryState()
+            setupStatusItem()
+            startAudioCaptureIfAvailable()
+            showLibrary()
+            try restoreAssignments()
+        } catch {
+            presentError(error)
+        }
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        runtime.stop()
+    }
+
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.title = "Luno"
+
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "Open Library", action: #selector(openLibraryFromMenu), keyEquivalent: "l"))
+        menu.addItem(NSMenuItem(title: "Stop Wallpapers", action: #selector(stopWallpapersFromMenu), keyEquivalent: "s"))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Start at Login", action: #selector(toggleStartAtLogin), keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Quit Luno", action: #selector(quit), keyEquivalent: "q"))
+        item.menu = menu
+        statusItem = item
+    }
+
+    private func installBundledSamplesIfNeeded() throws {
+        guard let library else { return }
+
+        var installedVersions = Dictionary(
+            uniqueKeysWithValues: try library.packages().map { ($0.manifest.id, $0.manifest.version) }
+        )
+        for sampleURL in try bundledSamplePackageURLs() {
+            let manifest = try archiveService.loadManifest(at: sampleURL)
+            guard installedVersions[manifest.id] != manifest.version else { continue }
+
+            _ = try library.importPackage(from: sampleURL)
+            installedVersions[manifest.id] = manifest.version
+        }
+    }
+
+    private func bundledSamplePackageURLs() throws -> [URL] {
+        let candidates = [
+            Bundle.main.resourceURL?
+                .appending(path: "Luno_LunoApp.bundle/SamplePackages", directoryHint: .isDirectory),
+            Bundle.main.bundleURL
+                .appending(path: "Luno_LunoApp.bundle/SamplePackages", directoryHint: .isDirectory),
+            Bundle.module.resourceURL?
+                .appending(path: "SamplePackages", directoryHint: .isDirectory)
+        ].compactMap(\.self)
+
+        for samplesURL in candidates where FileManager.default.fileExists(atPath: samplesURL.path) {
+            return try FileManager.default.contentsOfDirectory(
+                at: samplesURL,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+            .filter { $0.pathExtension.lowercased() == "luno" }
+            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+        }
+
+        return []
+    }
+
+    private func reloadLibraryState() throws {
+        packages = try library?.packages() ?? []
+        presets = try presetStore?.load() ?? []
+        libraryWindowController?.configure(packages: packages, presets: presets)
+    }
+
+    private func showLibrary() {
+        if libraryWindowController == nil {
+            let controller = LibraryWindowController()
+            controller.delegate = self
+            libraryWindowController = controller
+        }
+
+        libraryWindowController?.configure(packages: packages, presets: presets)
+        libraryWindowController?.showWindow(nil)
+        libraryWindowController?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func restoreAssignments() throws {
+        let assignments = try assignmentStore?.load() ?? []
+        for assignment in assignments {
+            guard let package = packages.first(where: { $0.manifest.id == assignment.packageID }) else {
+                continue
+            }
+            let preset = presets.first(where: { $0.id == assignment.presetID && $0.packageID == assignment.packageID })
+            try apply(package: package, preset: preset, displayID: CGDirectDisplayID(UInt32(assignment.displayID) ?? 0))
+        }
+    }
+
+    private func apply(package: LunoPackageRecord, preset: WallpaperPreset?, displayID: CGDirectDisplayID?) throws {
+        let decision = performancePolicy.decision(
+            powerSource: .powerAdapter,
+            isLowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            isFullscreenAppActive: false
+        )
+
+        if decision.shouldPause {
+            runtime.stop(displayID: displayID)
+            return
+        }
+
+        try runtime.show(
+            package: package,
+            preset: preset,
+            displayID: displayID,
+            frameRate: decision.frameRate,
+            audioProvider: { [weak self] in
+                self?.audioFeatures ?? .silent
+            }
+        )
+
+        try persistAssignment(package: package, preset: preset, displayID: displayID)
+    }
+
+    private func persistAssignment(package: LunoPackageRecord, preset: WallpaperPreset?, displayID: CGDirectDisplayID?) throws {
+        guard let assignmentStore else { return }
+
+        let targetDisplayIDs: [CGDirectDisplayID]
+        if let displayID {
+            targetDisplayIDs = [displayID]
+        } else {
+            targetDisplayIDs = NSScreen.screens.compactMap(\.lunoDisplayID)
+        }
+
+        var assignments = try assignmentStore.load()
+        for targetDisplayID in targetDisplayIDs {
+            assignments.removeAll { $0.displayID == String(targetDisplayID) }
+            assignments.append(DisplayAssignment(
+                displayID: String(targetDisplayID),
+                packageID: package.manifest.id,
+                presetID: preset?.id ?? "default"
+            ))
+        }
+        try assignmentStore.save(assignments)
+    }
+
+    private func presentError(_ error: Error) {
+        let alert = NSAlert(error: error)
+        alert.runModal()
+    }
+
+    private var audioFeatures: AudioFeatures {
+        if #available(macOS 15.0, *) {
+            return audioCapture?.features ?? .silent
+        }
+        return .silent
+    }
+
+    private func startAudioCaptureIfAvailable() {
+        guard #available(macOS 15.0, *) else { return }
+        let capture = SystemAudioCaptureService()
+        audioCapture = capture
+
+        Task { @MainActor in
+            do {
+                try await capture.start()
+            } catch {
+                await MainActor.run {
+                    self.statusItem?.button?.toolTip = "Luno is running without system audio access."
+                }
+            }
+        }
+    }
+
+    @objc private func openLibraryFromMenu() {
+        showLibrary()
+    }
+
+    @objc private func stopWallpapersFromMenu() {
+        runtime.stop()
+    }
+
+    @objc private func toggleStartAtLogin(_ sender: NSMenuItem) {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+                sender.state = .off
+            } else {
+                try SMAppService.mainApp.register()
+                sender.state = .on
+            }
+        } catch {
+            presentError(error)
+        }
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
+    }
+
+    @objc private func screenParametersDidChange() {
+        runtime.refreshDisplayLayout()
+        libraryWindowController?.reloadDisplays()
+    }
+
+    func libraryWindowDidRequestImport(_ controller: LibraryWindowController) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.zip, .folder]
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            _ = try library?.importPackage(from: url)
+            try reloadLibraryState()
+        } catch {
+            presentError(error)
+        }
+    }
+
+    func libraryWindow(_ controller: LibraryWindowController, didRequestExport package: LunoPackageRecord) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(package.manifest.name).luno"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try archiveService.exportPackage(from: package.packageURL, to: url)
+        } catch {
+            presentError(error)
+        }
+    }
+
+    func libraryWindow(
+        _ controller: LibraryWindowController,
+        didRequestApply package: LunoPackageRecord,
+        preset: WallpaperPreset?,
+        displayID: CGDirectDisplayID?
+    ) {
+        do {
+            try apply(package: package, preset: preset, displayID: displayID)
+        } catch {
+            presentError(error)
+        }
+    }
+
+    func libraryWindow(_ controller: LibraryWindowController, didSave preset: WallpaperPreset) {
+        do {
+            presets.removeAll { $0.id == preset.id && $0.packageID == preset.packageID }
+            presets.append(preset)
+            try presetStore?.save(presets)
+            try reloadLibraryState()
+        } catch {
+            presentError(error)
+        }
+    }
+}
+
+private struct LunoAppPaths {
+    var root: URL
+    var packages: URL
+    var presets: URL
+    var assignments: URL
+
+    static func `default`() throws -> LunoAppPaths {
+        let root = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ).appending(path: "Luno", directoryHint: .isDirectory)
+
+        return LunoAppPaths(
+            root: root,
+            packages: root.appending(path: "Packages", directoryHint: .isDirectory),
+            presets: root.appending(path: "presets.json"),
+            assignments: root.appending(path: "assignments.json")
+        )
+    }
+}
