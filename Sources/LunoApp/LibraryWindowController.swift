@@ -38,6 +38,8 @@ final class LibraryWindowController: NSWindowController {
     private let nowPlayingEnableSwitch = NSSwitch()
     private let nowPlayingStylePopup = NSPopUpButton()
     private let nowPlayingReactivitySwitch = NSSwitch()
+    private let nowPlayingIntensitySlider = NSSlider()
+    private let nowPlayingIntensityValueLabel = NSTextField(labelWithString: "20%")
     private let nowPlayingKeepVisibleSwitch = NSSwitch()
     private var audioReactorPreferences: AudioReactorPreferences = .defaults
     private let audioReactorEnableSwitch = NSSwitch()
@@ -75,6 +77,9 @@ final class LibraryWindowController: NSWindowController {
         nowPlayingPreferences = preferences
         nowPlayingEnableSwitch.state = preferences.isEnabled ? .on : .off
         nowPlayingReactivitySwitch.state = preferences.audioReactivityEnabled ? .on : .off
+        nowPlayingIntensitySlider.doubleValue = preferences.audioReactivityIntensity
+        nowPlayingIntensitySlider.isEnabled = preferences.audioReactivityEnabled
+        nowPlayingIntensityValueLabel.stringValue = formatIntensity(preferences.audioReactivityIntensity)
         nowPlayingKeepVisibleSwitch.state = preferences.keepVisibleWhilePaused ? .on : .off
 
         let index = NowPlayingPreferences.Style.allCases.firstIndex(of: preferences.style) ?? 0
@@ -85,6 +90,10 @@ final class LibraryWindowController: NSWindowController {
         audioReactorPreferences = clamped(preferences)
         syncAudioReactorControls()
         rebuildParameterControls()
+    }
+
+    private func formatIntensity(_ value: Double) -> String {
+        "\(Int(round(value * 100)))%"
     }
 
     func reloadDisplays() {
@@ -203,6 +212,20 @@ final class LibraryWindowController: NSWindowController {
         nowPlayingReactivitySwitch.target = self
         nowPlayingReactivitySwitch.action = #selector(nowPlayingReactivityChanged)
         stack.addArrangedSubview(labeled("React to music", control: nowPlayingReactivitySwitch))
+
+        nowPlayingIntensitySlider.minValue = 0
+        nowPlayingIntensitySlider.maxValue = 1
+        nowPlayingIntensitySlider.target = self
+        nowPlayingIntensitySlider.action = #selector(nowPlayingIntensityChanged)
+        nowPlayingIntensitySlider.isContinuous = true
+        nowPlayingIntensitySlider.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        nowPlayingIntensityValueLabel.alignment = .right
+        nowPlayingIntensityValueLabel.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        let intensityRow = NSStackView(views: [nowPlayingIntensitySlider, nowPlayingIntensityValueLabel])
+        intensityRow.orientation = .horizontal
+        intensityRow.alignment = .centerY
+        intensityRow.spacing = 8
+        stack.addArrangedSubview(labeled("Reaction intensity", control: intensityRow))
 
         nowPlayingKeepVisibleSwitch.target = self
         nowPlayingKeepVisibleSwitch.action = #selector(nowPlayingKeepVisibleChanged)
@@ -552,37 +575,20 @@ final class LibraryWindowController: NSWindowController {
 
     @objc private func nowPlayingReactivityChanged(_ sender: NSSwitch) {
         nowPlayingPreferences.audioReactivityEnabled = sender.state == .on
+        nowPlayingIntensitySlider.isEnabled = nowPlayingPreferences.audioReactivityEnabled
+        delegate?.libraryWindow(self, didChange: nowPlayingPreferences)
+    }
+
+    @objc private func nowPlayingIntensityChanged(_ sender: NSSlider) {
+        let clamped = min(max(sender.doubleValue, 0), 1)
+        nowPlayingPreferences.audioReactivityIntensity = clamped
+        nowPlayingIntensityValueLabel.stringValue = formatIntensity(clamped)
         delegate?.libraryWindow(self, didChange: nowPlayingPreferences)
     }
 
     @objc private func nowPlayingKeepVisibleChanged(_ sender: NSSwitch) {
         nowPlayingPreferences.keepVisibleWhilePaused = sender.state == .on
         delegate?.libraryWindow(self, didChange: nowPlayingPreferences)
-    }
-}
-
-private extension NSColor {
-    convenience init?(hexString: String) {
-        let hex = hexString.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        guard hex.count == 6, let value = Int(hex, radix: 16) else {
-            return nil
-        }
-        self.init(
-            calibratedRed: CGFloat((value >> 16) & 0xFF) / 255.0,
-            green: CGFloat((value >> 8) & 0xFF) / 255.0,
-            blue: CGFloat(value & 0xFF) / 255.0,
-            alpha: 1
-        )
-    }
-
-    var hexString: String {
-        let color = usingColorSpace(.deviceRGB) ?? self
-        return String(
-            format: "#%02X%02X%02X",
-            Int(round(color.redComponent * 255)),
-            Int(round(color.greenComponent * 255)),
-            Int(round(color.blueComponent * 255))
-        )
     }
 }
 
