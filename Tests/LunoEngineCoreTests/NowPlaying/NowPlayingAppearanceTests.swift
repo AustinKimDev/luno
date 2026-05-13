@@ -61,4 +61,29 @@ final class NowPlayingAppearanceTests: XCTestCase {
         let decoded = try JSONDecoder().decode(NowPlayingAppearance.self, from: data)
         XCTAssertEqual(decoded, original)
     }
+
+    func testFivePresetsExistInExpectedOrder() {
+        let ids = NowPlayingAppearance.presets.map(\.id)
+        XCTAssertEqual(ids, ["default", "vivid", "minimal", "neon", "mono"])
+    }
+
+    func testPresetIDsAndNamesAreUnique() {
+        let ids = Set(NowPlayingAppearance.presets.map(\.id))
+        let names = Set(NowPlayingAppearance.presets.map(\.name))
+        XCTAssertEqual(ids.count, NowPlayingAppearance.presets.count)
+        XCTAssertEqual(names.count, NowPlayingAppearance.presets.count)
+    }
+
+    func testDefaultPresetMatchesDefaultAppearance() {
+        let defaultPreset = NowPlayingAppearance.presets.first { $0.id == "default" }
+        XCTAssertNotNil(defaultPreset)
+        XCTAssertEqual(defaultPreset?.appearance, NowPlayingAppearance.default)
+    }
+
+    func testNeonPresetUsesCyanAccent() {
+        let neon = NowPlayingAppearance.presets.first { $0.id == "neon" }?.appearance
+        XCTAssertEqual(neon?.accentColor, "#00F0FF")
+        XCTAssertEqual(neon?.glowTint, "#00F0FF")
+        XCTAssertEqual(neon?.titleWeight, .bold)
+    }
 }

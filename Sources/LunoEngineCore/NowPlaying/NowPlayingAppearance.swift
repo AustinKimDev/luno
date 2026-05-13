@@ -72,3 +72,86 @@ public struct NowPlayingAppearance: Codable, Equatable, Sendable {
         return "#" + stripped.uppercased()
     }
 }
+
+public struct NowPlayingAppearancePreset: Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let appearance: NowPlayingAppearance
+
+    public init(id: String, name: String, appearance: NowPlayingAppearance) {
+        self.id = id
+        self.name = name
+        self.appearance = appearance
+    }
+}
+
+public extension NowPlayingAppearance {
+    static let presets: [NowPlayingAppearancePreset] = [
+        NowPlayingAppearancePreset(id: "default", name: "Default", appearance: .default),
+        NowPlayingAppearancePreset(
+            id: "vivid",
+            name: "Vivid",
+            appearance: NowPlayingAppearance(
+                cornerRadius: 18,
+                padding: 14,
+                borderWidth: 2,
+                borderOpacity: 0.20,
+                titleWeight: .bold,
+                subtitleWeight: .medium,
+                textColor: "#FFFFFF",
+                accentColor: "#FF3D81",
+                glowTint: "#FF6B9C"
+            )
+        ),
+        NowPlayingAppearancePreset(
+            id: "minimal",
+            name: "Minimal",
+            appearance: NowPlayingAppearance(
+                cornerRadius: 8,
+                padding: 12,
+                borderWidth: 0,
+                borderOpacity: 0.00,
+                titleWeight: .regular,
+                subtitleWeight: .regular,
+                textColor: "#FFFFFF",
+                accentColor: "#FFFFFF",
+                glowTint: "#FFFFFF"
+            )
+        ),
+        NowPlayingAppearancePreset(
+            id: "neon",
+            name: "Neon",
+            appearance: NowPlayingAppearance(
+                cornerRadius: 22,
+                padding: 14,
+                borderWidth: 2,
+                borderOpacity: 0.35,
+                titleWeight: .bold,
+                subtitleWeight: .medium,
+                textColor: "#FFFFFF",
+                accentColor: "#00F0FF",
+                glowTint: "#00F0FF"
+            )
+        ),
+        NowPlayingAppearancePreset(
+            id: "mono",
+            name: "Mono",
+            appearance: NowPlayingAppearance(
+                cornerRadius: 4,
+                padding: 14,
+                borderWidth: 1,
+                borderOpacity: 0.15,
+                titleWeight: .medium,
+                subtitleWeight: .regular,
+                textColor: "#FFFFFF",
+                accentColor: "#FFFFFF",
+                glowTint: "#FFFFFF"
+            )
+        )
+    ]
+
+    /// Returns the preset whose appearance equals this one, or nil if the value has diverged.
+    func matchingPreset() -> NowPlayingAppearancePreset? {
+        Self.presets.first { $0.appearance == self }
+    }
+}
