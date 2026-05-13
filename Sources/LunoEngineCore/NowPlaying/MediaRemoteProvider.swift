@@ -15,7 +15,6 @@ public actor MediaRemoteProvider: NowPlayingProvider, NowPlayingControls {
     private let queue = DispatchQueue(label: "com.luno.mediaremote.poll")
 
     private var pollTask: Task<Void, Never>?
-    private var observerToken: NSObjectProtocol?
     private var hasEmitted = false
     private var lastEmitted: NowPlayingTrack?
 
@@ -35,15 +34,6 @@ public actor MediaRemoteProvider: NowPlayingProvider, NowPlayingControls {
     public func start() async {
         guard symbols.isAvailable else { return }
 
-        symbols.registerForNotifications?()
-        observerToken = NotificationCenter.default.addObserver(
-            forName: Notification.Name("kMRMediaRemoteNowPlayingInfoDidChangeNotification"),
-            object: nil,
-            queue: nil
-        ) { [weak self] _ in
-            Task { await self?.refreshOnce() }
-        }
-
         let interval = pollInterval
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -54,11 +44,6 @@ public actor MediaRemoteProvider: NowPlayingProvider, NowPlayingControls {
     }
 
     public func stop() async {
-        if let observerToken {
-            NotificationCenter.default.removeObserver(observerToken)
-            self.observerToken = nil
-        }
-        symbols.unregisterForNotifications?()
         pollTask?.cancel()
         pollTask = nil
         continuation.finish()
