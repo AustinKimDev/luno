@@ -15,7 +15,7 @@ final class NowPlayingWindowController: NSWindowController {
 
         let window = NowPlayingFloatingWindow(
             contentRect: NSRect(x: 0, y: 0, width: 280, height: 72),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -26,6 +26,7 @@ final class NowPlayingWindowController: NSWindowController {
         window.collectionBehavior = [.stationary]
         window.ignoresMouseEvents = false
         window.isMovableByWindowBackground = true
+        window.hidesOnDeactivate = false
 
         super.init(window: window)
         window.delegate = self
@@ -122,7 +123,7 @@ final class NowPlayingWindowController: NSWindowController {
 }
 
 @MainActor
-private final class NowPlayingFloatingWindow: NSWindow {
+private final class NowPlayingFloatingWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
