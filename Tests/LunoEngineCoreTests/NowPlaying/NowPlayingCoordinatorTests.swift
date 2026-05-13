@@ -61,4 +61,35 @@ final class NowPlayingCoordinatorTests: XCTestCase {
 
         await coordinator.stop()
     }
+
+    func testHigherPriorityProviderKeepsHoldWithinWindow() async throws {
+        let clock = FakeNowPlayingClock(start: Date(timeIntervalSince1970: 1_000))
+        let am = MockNowPlayingProvider(source: .appleMusic)
+        let sp = MockNowPlayingProvider(source: .spotify)
+        let coordinator = NowPlayingCoordinator(
+            providers: [am, sp],
+            clock: clock,
+            priorityHoldSeconds: 2.0
+        )
+
+        var iterator = coordinator.tracks.makeAsyncIterator()
+        await coordinator.start()
+
+        let amTrack = NowPlayingTrack.fixture(title: "AM", source: .appleMusic, updatedAt: clock.now())
+        am.emit(amTrack)
+        _ = await iterator.next()
+
+        clock.advance(by: 1)
+        let spTrack = NowPlayingTrack.fixture(title: "SP", source: .spotify, updatedAt: clock.now())
+        sp.emit(spTrack)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        clock.advance(by: 1.5)
+        let spTrack2 = NowPlayingTrack.fixture(title: "SP-late", source: .spotify, updatedAt: clock.now())
+        sp.emit(spTrack2)
+        let received = await iterator.next() ?? nil
+        XCTAssertEqual(received?.title, "SP-late")
+
+        await coordinator.stop()
+    }
 }
