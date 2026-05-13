@@ -401,6 +401,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
                 self?.audioFeatures ?? .silent
             }
         )
+        viewModel.onPreferencesChanged = { [weak self] preferences in
+            self?.nowPlayingPreferences = preferences
+            self?.libraryWindowController?.configureNowPlaying(preferences)
+        }
         viewModel.controlSender = { [weak self] command, source in
             guard let self else { return }
             switch source {

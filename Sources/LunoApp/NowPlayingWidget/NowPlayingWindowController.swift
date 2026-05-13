@@ -4,8 +4,11 @@ import SwiftUI
 
 @MainActor
 final class NowPlayingWindowController: NSWindowController {
+    private static let widgetLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+
     private let viewModel: NowPlayingViewModel
     private var hostingView: NSHostingView<RootContainer>?
+    private var savePositionTimer: Timer?
 
     init(viewModel: NowPlayingViewModel) {
         self.viewModel = viewModel
@@ -19,12 +22,13 @@ final class NowPlayingWindowController: NSWindowController {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        window.level = .floating
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        window.level = Self.widgetLevel
+        window.collectionBehavior = [.stationary]
         window.ignoresMouseEvents = false
-        window.isMovableByWindowBackground = false
+        window.isMovableByWindowBackground = true
 
         super.init(window: window)
+        window.delegate = self
 
         let root = RootContainer(viewModel: viewModel, windowController: self)
         let host = NSHostingView(rootView: root)
@@ -39,6 +43,7 @@ final class NowPlayingWindowController: NSWindowController {
     func show() {
         applySavedPosition()
         applySizeForCurrentStyle()
+        applyPresentationMode()
         window?.orderFrontRegardless()
     }
 
@@ -54,6 +59,16 @@ final class NowPlayingWindowController: NSWindowController {
         window.setFrame(frame, display: true, animate: false)
     }
 
+    func togglePinned() {
+        var preferences = viewModel.preferences
+        preferences.isPinned.toggle()
+        viewModel.update(preferences: preferences)
+        applyPresentationMode()
+        if preferences.isPinned {
+            window?.orderFrontRegardless()
+        }
+    }
+
     func saveCurrentPosition() {
         guard let window, let screen = window.screen else { return }
         let displayID = screen.lunoDisplayID.map { String($0) } ?? "main"
@@ -63,6 +78,17 @@ final class NowPlayingWindowController: NSWindowController {
             y: Double(window.frame.origin.y)
         )
         viewModel.update(preferences: preferences)
+    }
+
+    private func applyPresentationMode() {
+        guard let window else { return }
+        if viewModel.preferences.isPinned {
+            window.level = .floating
+            window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        } else {
+            window.level = Self.widgetLevel
+            window.collectionBehavior = [.stationary]
+        }
     }
 
     private func applySavedPosition() {
@@ -101,11 +127,20 @@ private final class NowPlayingFloatingWindow: NSWindow {
     override var canBecomeMain: Bool { false }
 }
 
+extension NowPlayingWindowController: NSWindowDelegate {
+    func windowDidMove(_ notification: Notification) {
+        savePositionTimer?.invalidate()
+        savePositionTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.saveCurrentPosition()
+            }
+        }
+    }
+}
+
 private struct RootContainer: View {
     @Bindable var viewModel: NowPlayingViewModel
     weak var windowController: NowPlayingWindowController?
-
-    @State private var dragOrigin: NSPoint?
 
     var body: some View {
         Group {
@@ -121,45 +156,25 @@ private struct RootContainer: View {
                 .onHover { hovering in
                     viewModel.isHovering = hovering
                 }
-                .gesture(
-                    DragGesture(coordinateSpace: .global)
-                        .onChanged { value in
-                            guard let window = windowController?.window else { return }
-                            let origin = dragOrigin ?? window.frame.origin
-                            dragOrigin = origin
-                            window.setFrameOrigin(NSPoint(
-                                x: origin.x + value.translation.width,
-                                y: origin.y - value.translation.height
-                            ))
-                        }
-                        .onEnded { _ in
-                            dragOrigin = nil
-                            windowController?.saveCurrentPosition()
-                        }
-                )
                 .opacity(viewModel.visible ? 1 : 0)
             } else {
                 WaitingForMusicView()
-                    .gesture(dragGesture)
             }
         }
-    }
-
-    private var dragGesture: some Gesture {
-        DragGesture(coordinateSpace: .global)
-            .onChanged { value in
-                guard let window = windowController?.window else { return }
-                let origin = dragOrigin ?? window.frame.origin
-                dragOrigin = origin
-                window.setFrameOrigin(NSPoint(
-                    x: origin.x + value.translation.width,
-                    y: origin.y - value.translation.height
-                ))
+        .overlay(alignment: .topTrailing) {
+            Button {
+                windowController?.togglePinned()
+            } label: {
+                Image(systemName: viewModel.preferences.isPinned ? "pin.fill" : "pin")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(viewModel.preferences.isPinned ? 0.95 : 0.65))
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(Color.black.opacity(0.26)))
             }
-            .onEnded { _ in
-                dragOrigin = nil
-                windowController?.saveCurrentPosition()
-            }
+            .buttonStyle(.plain)
+            .help(viewModel.preferences.isPinned ? "Unpin widget" : "Pin above apps and full screen spaces")
+            .padding(6)
+        }
     }
 }
 

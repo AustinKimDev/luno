@@ -21,6 +21,7 @@ final class NowPlayingViewModel {
     var preferences: NowPlayingPreferences
     var permissionState: PermissionState = .unknown
     var controlSender: ((NowPlayingControlCommand, NowPlayingSource) async throws -> Void)?
+    var onPreferencesChanged: ((NowPlayingPreferences) -> Void)?
 
     var activeSource: NowPlayingSource? {
         track?.source
@@ -104,6 +105,7 @@ final class NowPlayingViewModel {
     func update(preferences: NowPlayingPreferences) {
         self.preferences = preferences
         try? preferencesStore.save(preferences)
+        onPreferencesChanged?(preferences)
     }
 
     private func sendCommand(_ command: NowPlayingControlCommand, to source: NowPlayingSource) async throws {

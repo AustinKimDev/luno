@@ -1,6 +1,15 @@
 import Foundation
 
 public struct NowPlayingPreferences: Codable, Equatable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case style
+        case audioReactivityEnabled
+        case keepVisibleWhilePaused
+        case isPinned
+        case positionsByDisplay
+    }
+
     public enum Style: String, Codable, Sendable, CaseIterable {
         case albumDominant
         case compactBar
@@ -21,6 +30,7 @@ public struct NowPlayingPreferences: Codable, Equatable, Sendable {
     public var style: Style
     public var audioReactivityEnabled: Bool
     public var keepVisibleWhilePaused: Bool
+    public var isPinned: Bool
     public var positionsByDisplay: [String: Position]
 
     public init(
@@ -28,13 +38,35 @@ public struct NowPlayingPreferences: Codable, Equatable, Sendable {
         style: Style,
         audioReactivityEnabled: Bool,
         keepVisibleWhilePaused: Bool,
+        isPinned: Bool = false,
         positionsByDisplay: [String: Position]
     ) {
         self.isEnabled = isEnabled
         self.style = style
         self.audioReactivityEnabled = audioReactivityEnabled
         self.keepVisibleWhilePaused = keepVisibleWhilePaused
+        self.isPinned = isPinned
         self.positionsByDisplay = positionsByDisplay
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        self.style = try container.decode(Style.self, forKey: .style)
+        self.audioReactivityEnabled = try container.decode(Bool.self, forKey: .audioReactivityEnabled)
+        self.keepVisibleWhilePaused = try container.decode(Bool.self, forKey: .keepVisibleWhilePaused)
+        self.isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        self.positionsByDisplay = try container.decode([String: Position].self, forKey: .positionsByDisplay)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(style, forKey: .style)
+        try container.encode(audioReactivityEnabled, forKey: .audioReactivityEnabled)
+        try container.encode(keepVisibleWhilePaused, forKey: .keepVisibleWhilePaused)
+        try container.encode(isPinned, forKey: .isPinned)
+        try container.encode(positionsByDisplay, forKey: .positionsByDisplay)
     }
 
     public static let defaults = NowPlayingPreferences(
@@ -42,6 +74,7 @@ public struct NowPlayingPreferences: Codable, Equatable, Sendable {
         style: .compactBar,
         audioReactivityEnabled: true,
         keepVisibleWhilePaused: false,
+        isPinned: false,
         positionsByDisplay: [:]
     )
 }
