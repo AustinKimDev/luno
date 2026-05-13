@@ -177,6 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
 
         if decision.shouldPause {
             runtime.stop(displayID: displayID)
+            reconcileAudioCaptureState()
             return
         }
 

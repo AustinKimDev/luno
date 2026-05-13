@@ -475,7 +475,7 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         colorPixelFormat: MTLPixelFormat
     ) throws -> any MTLRenderPipelineState {
         do {
-            let library = try device.makeLibrary(source: overlayShaderSource, options: nil)
+            let library = try device.makeLibrary(source: LunoOverlayShaderSource.source, options: nil)
             guard let vertex = library.makeFunction(name: "lunoOverlayVertex"),
                   let fragment = library.makeFunction(name: "lunoOverlayFragment")
             else {
@@ -502,7 +502,10 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    private static let overlayShaderSource = """
+}
+
+internal enum LunoOverlayShaderSource {
+    internal static let source = """
     #include <metal_stdlib>
     using namespace metal;
 
@@ -596,7 +599,6 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         return half4(half3(color), half(alpha));
     }
     """
-
 }
 
 private struct LunoShaderUniforms {
