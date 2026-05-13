@@ -45,4 +45,58 @@ final class NowPlayingPreferencesStoreTests: XCTestCase {
         XCTAssertTrue(loaded.isEnabled)
         XCTAssertFalse(loaded.isPinned)
     }
+
+    func testLegacyJSONWithoutAppearanceLoadsWithDefaultAppearance() throws {
+        let json = """
+        {
+          "isEnabled": true,
+          "style": "albumDominant",
+          "audioReactivityEnabled": true,
+          "audioReactivityIntensity": 0.4,
+          "keepVisibleWhilePaused": false,
+          "isPinned": false,
+          "positionsByDisplay": {}
+        }
+        """.data(using: .utf8)!
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("luno-now-playing-legacy-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try json.write(to: url)
+
+        let store = NowPlayingPreferencesStore(fileURL: url)
+        let loaded = try store.load()
+
+        XCTAssertEqual(loaded.appearance, .default)
+        XCTAssertEqual(loaded.audioReactivityIntensity, 0.4)
+        XCTAssertTrue(loaded.isEnabled)
+    }
+
+    func testAppearancePersistsThroughSaveAndLoad() throws {
+        let custom = NowPlayingAppearance(
+            cornerRadius: 22,
+            padding: 18,
+            borderWidth: 2,
+            borderOpacity: 0.35,
+            titleWeight: .bold,
+            subtitleWeight: .medium,
+            textColor: "#FFFFFF",
+            accentColor: "#00F0FF",
+            glowTint: "#00F0FF",
+            scaleReaction: 0.8,
+            glowReaction: 1.0,
+            borderReaction: 0.6
+        )
+        var preferences = NowPlayingPreferences.defaults
+        preferences.appearance = custom
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("luno-now-playing-roundtrip-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = NowPlayingPreferencesStore(fileURL: url)
+        try store.save(preferences)
+        let reloaded = try store.load()
+
+        XCTAssertEqual(reloaded.appearance, custom)
+    }
 }
