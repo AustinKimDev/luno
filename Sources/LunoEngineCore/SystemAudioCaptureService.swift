@@ -10,16 +10,27 @@ public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStream
     private let lock = NSLock()
     private let analyzer = AudioSpectrumAnalyzer()
     private var stream: SCStream?
-    private var latestFeatures = AudioFeatures.silent
+    private var latestScalars = AudioScalars.silent
 
     public override init() {
         super.init()
     }
 
-    public var features: AudioFeatures {
+    public var scalars: AudioScalars {
         lock.lock()
         defer { lock.unlock() }
-        return latestFeatures
+        return latestScalars
+    }
+
+    public var features: AudioFeatures {
+        let snapshot = scalars
+        return AudioFeatures(
+            rms: snapshot.rms,
+            bass: snapshot.bass,
+            mid: snapshot.mid,
+            treble: snapshot.treble,
+            spectrum: AudioFeatures.silent.spectrum
+        )
     }
 
     @MainActor
@@ -56,19 +67,16 @@ public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStream
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of outputType: SCStreamOutputType
     ) {
-        guard outputType == .audio,
-              sampleBuffer.isValid,
-              let samples = floatSamples(from: sampleBuffer),
-              !samples.isEmpty
-        else {
-            return
-        }
-
+        guard outputType == .audio, sampleBuffer.isValid else { return }
         let sampleRate = sampleRate(from: sampleBuffer) ?? 48_000
-        let features = analyzer.analyze(samples: samples, sampleRate: sampleRate)
-        lock.lock()
-        latestFeatures = features
-        lock.unlock()
+
+        withFloatSamples(from: sampleBuffer) { buffer in
+            guard !buffer.isEmpty else { return }
+            let scalars = analyzer.analyzeScalars(samples: buffer, sampleRate: sampleRate)
+            lock.lock()
+            latestScalars = scalars
+            lock.unlock()
+        }
     }
 
     private func sampleRate(from sampleBuffer: CMSampleBuffer) -> Double? {
@@ -80,18 +88,21 @@ public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStream
         return streamDescription.pointee.mSampleRate
     }
 
-    private func floatSamples(from sampleBuffer: CMSampleBuffer) -> [Float]? {
+    private func withFloatSamples(
+        from sampleBuffer: CMSampleBuffer,
+        _ body: (UnsafeBufferPointer<Float>) -> Void
+    ) {
         guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
               let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(format)
         else {
-            return nil
+            return
         }
 
         let description = streamDescription.pointee
         guard description.mFormatID == kAudioFormatLinearPCM,
               description.mFormatFlags & kAudioFormatFlagIsFloat != 0
         else {
-            return nil
+            return
         }
 
         var audioBufferList = AudioBufferList()
@@ -110,12 +121,13 @@ public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStream
         guard status == noErr,
               let data = audioBufferList.mBuffers.mData
         else {
-            return nil
+            return
         }
 
+        _ = blockBuffer
         let count = Int(audioBufferList.mBuffers.mDataByteSize) / MemoryLayout<Float>.stride
-        let buffer = data.assumingMemoryBound(to: Float.self)
-        return Array(UnsafeBufferPointer(start: buffer, count: count))
+        let pointer = data.assumingMemoryBound(to: Float.self)
+        body(UnsafeBufferPointer(start: pointer, count: count))
     }
 }
 #endif

@@ -26,10 +26,9 @@ public enum WallpaperRuntimeError: Error, LocalizedError {
 @MainActor
 public final class WallpaperRuntime {
     private var controllers: [CGDirectDisplayID: WallpaperWindowController] = [:]
-    private var spaceChangeObserver: NSObjectProtocol?
 
     public init() {
-        spaceChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+        NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil,
             queue: .main
@@ -37,12 +36,6 @@ public final class WallpaperRuntime {
             MainActor.assumeIsolated {
                 self?.reorderFront()
             }
-        }
-    }
-
-    deinit {
-        if let observer = spaceChangeObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
     }
 
@@ -61,7 +54,7 @@ public final class WallpaperRuntime {
         preset: WallpaperPreset?,
         displayID: CGDirectDisplayID?,
         frameRate: Int,
-        audioProvider: @escaping @MainActor () -> AudioFeatures
+        audioProvider: @escaping @MainActor () -> AudioScalars
     ) throws {
         let screens = targetScreens(displayID: displayID)
         for screen in screens {
@@ -120,7 +113,7 @@ private final class WallpaperWindowController {
         package: LunoPackageRecord,
         preset: WallpaperPreset?,
         frameRate: Int,
-        audioProvider: @escaping @MainActor () -> AudioFeatures
+        audioProvider: @escaping @MainActor () -> AudioScalars
     ) throws {
         let geometry = WallpaperWindowGeometry(screenFrame: screen.frame)
         let configuration = WallpaperWindowConfiguration()
@@ -145,7 +138,7 @@ private final class WallpaperWindowController {
         window.ignoresMouseEvents = true
         window.hasShadow = false
         window.animationBehavior = .none
-        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)))
+        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
         window.collectionBehavior = configuration.collectionBehavior
     }
 
@@ -173,7 +166,7 @@ private final class MetalWallpaperView: MTKView {
         package: LunoPackageRecord,
         preset: WallpaperPreset?,
         frameRate: Int,
-        audioProvider: @escaping @MainActor () -> AudioFeatures
+        audioProvider: @escaping @MainActor () -> AudioScalars
     ) throws {
         guard let device = MTLCreateSystemDefaultDevice() else {
             throw WallpaperRuntimeError.metalUnavailable
@@ -220,13 +213,13 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
     private let parameterPack: ShaderParameterPack
     private let backgroundTexture: (any MTLTexture)?
     private let samplerState: (any MTLSamplerState)?
-    private let audioProvider: @MainActor () -> AudioFeatures
+    private let audioProvider: @MainActor () -> AudioScalars
 
     init(
         view: MTKView,
         package: LunoPackageRecord,
         preset: WallpaperPreset?,
-        audioProvider: @escaping @MainActor () -> AudioFeatures
+        audioProvider: @escaping @MainActor () -> AudioScalars
     ) throws {
         guard let device = view.device,
               let commandQueue = device.makeCommandQueue()

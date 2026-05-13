@@ -30,9 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
             try installBundledSamplesIfNeeded()
             try reloadLibraryState()
             setupStatusItem()
-            startAudioCaptureIfAvailable()
             showLibrary()
             try restoreAssignments()
+            reconcileAudioCaptureState()
         } catch {
             presentError(error)
         }
@@ -150,11 +150,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
             displayID: displayID,
             frameRate: decision.frameRate,
             audioProvider: { [weak self] in
-                self?.audioFeatures ?? .silent
+                self?.audioScalars ?? .silent
             }
         )
 
         try persistAssignment(package: package, preset: preset, displayID: displayID)
+        reconcileAudioCaptureState()
     }
 
     private func persistAssignment(package: LunoPackageRecord, preset: WallpaperPreset?, displayID: CGDirectDisplayID?) throws {
@@ -184,15 +185,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         alert.runModal()
     }
 
-    private var audioFeatures: AudioFeatures {
+    private var audioScalars: AudioScalars {
         if #available(macOS 15.0, *) {
-            return audioCapture?.features ?? .silent
+            return audioCapture?.scalars ?? .silent
         }
         return .silent
     }
 
     private func startAudioCaptureIfAvailable() {
         guard #available(macOS 15.0, *) else { return }
+        guard audioCapture == nil else { return }
         let capture = SystemAudioCaptureService()
         audioCapture = capture
 
@@ -207,12 +209,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         }
     }
 
+    private func stopAudioCaptureIfRunning() {
+        guard #available(macOS 15.0, *) else { return }
+        guard let capture = audioCapture else { return }
+        audioCapture = nil
+        Task { @MainActor in
+            await capture.stop()
+        }
+    }
+
+    private func anyActivePackageNeedsAudio() -> Bool {
+        guard let assignmentStore else { return false }
+        let assignments = (try? assignmentStore.load()) ?? []
+        let activeDisplayIDs = Set(runtime.activeDisplayIDs.map(String.init))
+        for assignment in assignments where activeDisplayIDs.contains(assignment.displayID) {
+            guard let package = packages.first(where: { $0.manifest.id == assignment.packageID }) else { continue }
+            if !package.manifest.audioBindings.isEmpty { return true }
+        }
+        return false
+    }
+
+    private func reconcileAudioCaptureState() {
+        if anyActivePackageNeedsAudio() {
+            startAudioCaptureIfAvailable()
+        } else {
+            stopAudioCaptureIfRunning()
+        }
+    }
+
     @objc private func openLibraryFromMenu() {
         showLibrary()
     }
 
     @objc private func stopWallpapersFromMenu() {
         runtime.stop()
+        reconcileAudioCaptureState()
     }
 
     @objc private func toggleStartAtLogin(_ sender: NSMenuItem) {
