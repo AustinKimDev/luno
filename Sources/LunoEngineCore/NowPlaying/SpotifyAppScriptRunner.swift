@@ -1,57 +1,22 @@
+import AppKit
 import Foundation
 
 public final class SpotifyAppScriptRunner: AppleScriptRunner, @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.luno.applescript.spotify")
-    private let fetchScript: NSAppleScript?
+    private static let bundleIdentifier = "com.spotify.client"
 
-    public init() {
-        let source = """
-        if application "Spotify" is running then
-            tell application "Spotify"
-                set playState to player state as string
-                if playState is "playing" or playState is "paused" then
-                    set isPlayingFlag to ((playState is "playing") as integer)
-                    set trk to current track
-                    set trackName to (name of trk as string)
-                    try
-                        set trackArtist to (artist of trk as string)
-                    on error
-                        set trackArtist to ""
-                    end try
-                    try
-                        set trackAlbum to (album of trk as string)
-                    on error
-                        set trackAlbum to ""
-                    end try
-                    try
-                        set trackArtURL to (artwork url of trk as string)
-                    on error
-                        set trackArtURL to ""
-                    end try
-                    try
-                        set trackSpotID to (spotify url of trk as string)
-                    on error
-                        set trackSpotID to ""
-                    end try
-                    return {trackName, trackArtist, trackAlbum, trackSpotID, isPlayingFlag, trackArtURL}
-                end if
-            end tell
-        end if
-        return {}
-        """
-        self.fetchScript = NSAppleScript(source: source)
-        var compileError: NSDictionary?
-        _ = self.fetchScript?.compileAndReturnError(&compileError)
-    }
+    private let queue = DispatchQueue(label: "com.luno.applescript.spotify")
+
+    public init() {}
 
     public func fetchTrack() async throws -> RawTrackInfo? {
         try await withCheckedThrowingContinuation { continuation in
-            queue.async { [weak self] in
-                guard let self else {
+            queue.async {
+                guard Self.isSpotifyRunning() else {
                     continuation.resume(returning: nil)
                     return
                 }
-                guard let script = self.fetchScript else {
+
+                guard let script = NSAppleScript(source: Self.fetchSource) else {
                     continuation.resume(throwing: AppleScriptRunnerError.scriptError("script not compiled"))
                     return
                 }
@@ -81,15 +46,16 @@ public final class SpotifyAppScriptRunner: AppleScriptRunner, @unchecked Sendabl
             action = "previous track"
         }
 
-        let source = """
-        if application "Spotify" is running then
-            tell application "Spotify" to \(action)
-        end if
-        """
+        let source = "tell application id \"\(Self.bundleIdentifier)\" to \(action)"
         let invalidScriptMessage = "invalid script for \(command)"
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
+                guard Self.isSpotifyRunning() else {
+                    continuation.resume()
+                    return
+                }
+
                 guard let script = NSAppleScript(source: source) else {
                     continuation.resume(throwing: AppleScriptRunnerError.scriptError(invalidScriptMessage))
                     return
@@ -103,6 +69,45 @@ public final class SpotifyAppScriptRunner: AppleScriptRunner, @unchecked Sendabl
                 }
             }
         }
+    }
+
+    private static let fetchSource = """
+    tell application id "\(bundleIdentifier)"
+        set playState to player state as string
+        if playState is "playing" or playState is "paused" then
+            set isPlayingFlag to ((playState is "playing") as integer)
+            set trk to current track
+            set trackName to (name of trk as string)
+            try
+                set trackArtist to (artist of trk as string)
+            on error
+                set trackArtist to ""
+            end try
+            try
+                set trackAlbum to (album of trk as string)
+            on error
+                set trackAlbum to ""
+            end try
+            try
+                set trackArtURL to (artwork url of trk as string)
+            on error
+                set trackArtURL to ""
+            end try
+            try
+                set trackSpotID to (spotify url of trk as string)
+            on error
+                set trackSpotID to ""
+            end try
+            return {trackName, trackArtist, trackAlbum, trackSpotID, isPlayingFlag, trackArtURL}
+        end if
+    end tell
+    return {}
+    """
+
+    private static func isSpotifyRunning() -> Bool {
+        NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleIdentifier)
+            .contains { !$0.isTerminated }
     }
 
     private static func parse(_ descriptor: NSAppleEventDescriptor) -> RawTrackInfo? {
