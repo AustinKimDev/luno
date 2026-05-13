@@ -15,7 +15,11 @@ protocol LibraryWindowControllerDelegate: AnyObject {
     )
     func libraryWindow(_ controller: LibraryWindowController, didSave preset: WallpaperPreset)
     func libraryWindow(_ controller: LibraryWindowController, didChange nowPlayingPreferences: NowPlayingPreferences)
-    func libraryWindow(_ controller: LibraryWindowController, didChange audioReactorPreferences: AudioReactorPreferences)
+    func libraryWindow(
+        _ controller: LibraryWindowController,
+        didChange audioReactorPreferences: AudioReactorPreferences,
+        shouldPersist: Bool
+    )
 }
 
 @MainActor
@@ -37,13 +41,13 @@ final class LibraryWindowController: NSWindowController {
     private let nowPlayingKeepVisibleSwitch = NSSwitch()
     private var audioReactorPreferences: AudioReactorPreferences = .defaults
     private let audioReactorEnableSwitch = NSSwitch()
-    private let audioReactorIntensitySlider = NSSlider(value: AudioReactorPreferences.defaults.intensity, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let audioReactorIntensitySlider = CommittingSlider(value: AudioReactorPreferences.defaults.intensity, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let audioReactorResponseControl = NSSegmentedControl(labels: ["Soft", "Punchy", "Hard"], trackingMode: .selectOne, target: nil, action: nil)
-    private let audioReactorBassPulseSlider = NSSlider(value: AudioReactorPreferences.defaults.bassPulseStrength, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let audioReactorBassPulseSlider = CommittingSlider(value: AudioReactorPreferences.defaults.bassPulseStrength, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let audioReactorPulseRingSwitch = NSSwitch()
     private let audioReactorSpectrumBarsSwitch = NSSwitch()
     private let audioReactorWaveLineSwitch = NSSwitch()
-    private let audioReactorOverlayOpacitySlider = NSSlider(value: AudioReactorPreferences.defaults.overlayOpacity, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let audioReactorOverlayOpacitySlider = CommittingSlider(value: AudioReactorPreferences.defaults.overlayOpacity, minValue: 0, maxValue: 1, target: nil, action: nil)
 
     convenience init() {
         let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 620))
@@ -97,18 +101,40 @@ final class LibraryWindowController: NSWindowController {
     }
 
     private func buildUI(in root: NSView) {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(scrollView)
+
+        let documentView = NSView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = documentView
+
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(stack)
+        documentView.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -20)
+            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: root.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+            documentView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            documentView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            documentView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            documentView.bottomAnchor.constraint(equalTo: scrollView.contentView.bottomAnchor),
+            documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+
+            stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: documentView.trailingAnchor, constant: -20),
+            stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 20),
+            stack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -20)
         ])
 
         let title = NSTextField(labelWithString: "Luno")
@@ -314,6 +340,15 @@ final class LibraryWindowController: NSWindowController {
         audioReactorIntensitySlider.isContinuous = true
         audioReactorBassPulseSlider.isContinuous = true
         audioReactorOverlayOpacitySlider.isContinuous = true
+        audioReactorIntensitySlider.commitHandler = { [weak self] _ in
+            self?.commitAudioReactorPreferences()
+        }
+        audioReactorBassPulseSlider.commitHandler = { [weak self] _ in
+            self?.commitAudioReactorPreferences()
+        }
+        audioReactorOverlayOpacitySlider.commitHandler = { [weak self] _ in
+            self?.commitAudioReactorPreferences()
+        }
         audioReactorIntensitySlider.widthAnchor.constraint(equalToConstant: 220).isActive = true
         audioReactorResponseControl.widthAnchor.constraint(equalToConstant: 220).isActive = true
         audioReactorBassPulseSlider.widthAnchor.constraint(equalToConstant: 220).isActive = true
@@ -369,10 +404,14 @@ final class LibraryWindowController: NSWindowController {
         )
     }
 
-    private func notifyAudioReactorPreferencesChanged() {
+    private func notifyAudioReactorPreferencesChanged(shouldPersist: Bool) {
         audioReactorPreferences = clamped(audioReactorPreferences)
         syncAudioReactorControls()
-        delegate?.libraryWindow(self, didChange: audioReactorPreferences)
+        delegate?.libraryWindow(self, didChange: audioReactorPreferences, shouldPersist: shouldPersist)
+    }
+
+    private func commitAudioReactorPreferences() {
+        notifyAudioReactorPreferencesChanged(shouldPersist: true)
     }
 
     private func makeControl(for parameter: WallpaperParameterDefinition, value: ParameterValue) -> NSControl {
@@ -432,12 +471,12 @@ final class LibraryWindowController: NSWindowController {
 
     @objc private func audioReactorEnabledChanged(_ sender: NSSwitch) {
         audioReactorPreferences.isEnabled = sender.state == .on
-        notifyAudioReactorPreferencesChanged()
+        notifyAudioReactorPreferencesChanged(shouldPersist: true)
     }
 
     @objc private func audioReactorIntensityChanged(_ sender: NSSlider) {
         audioReactorPreferences.intensity = AudioReactorPreferences.clamp(sender.doubleValue)
-        notifyAudioReactorPreferencesChanged()
+        notifyAudioReactorPreferencesChanged(shouldPersist: false)
     }
 
     @objc private func audioReactorResponseChanged(_ sender: NSSegmentedControl) {
@@ -445,32 +484,32 @@ final class LibraryWindowController: NSWindowController {
         guard responses.indices.contains(sender.selectedSegment) else { return }
 
         audioReactorPreferences.response = responses[sender.selectedSegment]
-        notifyAudioReactorPreferencesChanged()
+        notifyAudioReactorPreferencesChanged(shouldPersist: true)
     }
 
     @objc private func audioReactorBassPulseChanged(_ sender: NSSlider) {
         audioReactorPreferences.bassPulseStrength = AudioReactorPreferences.clamp(sender.doubleValue)
-        notifyAudioReactorPreferencesChanged()
+        notifyAudioReactorPreferencesChanged(shouldPersist: false)
     }
 
     @objc private func audioReactorPulseRingChanged(_ sender: NSSwitch) {
         audioReactorPreferences.showsPulseRing = sender.state == .on
-        notifyAudioReactorPreferencesChanged()
+        notifyAudioReactorPreferencesChanged(shouldPersist: true)
     }
 
     @objc private func audioReactorSpectrumBarsChanged(_ sender: NSSwitch) {
         audioReactorPreferences.showsSpectrumBars = sender.state == .on
-        notifyAudioReactorPreferencesChanged()
+        notifyAudioReactorPreferencesChanged(shouldPersist: true)
     }
 
     @objc private func audioReactorWaveLineChanged(_ sender: NSSwitch) {
         audioReactorPreferences.showsWaveLine = sender.state == .on
-        notifyAudioReactorPreferencesChanged()
+        notifyAudioReactorPreferencesChanged(shouldPersist: true)
     }
 
     @objc private func audioReactorOverlayOpacityChanged(_ sender: NSSlider) {
         audioReactorPreferences.overlayOpacity = AudioReactorPreferences.clamp(sender.doubleValue)
-        notifyAudioReactorPreferencesChanged()
+        notifyAudioReactorPreferencesChanged(shouldPersist: false)
     }
 
     @objc private func applySelectedPackage() {
@@ -544,5 +583,19 @@ private extension NSColor {
             Int(round(color.greenComponent * 255)),
             Int(round(color.blueComponent * 255))
         )
+    }
+}
+
+private final class CommittingSlider: NSSlider {
+    var commitHandler: ((CommittingSlider) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        commitHandler?(self)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        super.keyDown(with: event)
+        commitHandler?(self)
     }
 }

@@ -380,8 +380,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         updateNowPlaying(preferences: nowPlayingPreferences)
     }
 
-    func libraryWindow(_ controller: LibraryWindowController, didChange audioReactorPreferences: AudioReactorPreferences) {
-        updateAudioReactor(preferences: audioReactorPreferences)
+    func libraryWindow(
+        _ controller: LibraryWindowController,
+        didChange audioReactorPreferences: AudioReactorPreferences,
+        shouldPersist: Bool
+    ) {
+        updateAudioReactor(preferences: audioReactorPreferences, shouldPersist: shouldPersist)
     }
 
     private func startNowPlaying() {
@@ -456,8 +460,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         reconcileAudioCaptureState()
     }
 
-    private func updateAudioReactor(preferences: AudioReactorPreferences) {
+    private func updateAudioReactor(preferences: AudioReactorPreferences, shouldPersist: Bool) {
         audioReactorPreferences = preferences
+        guard shouldPersist else { return }
+
         try? audioReactorPreferencesStore?.save(preferences)
         reconcileAudioCaptureState()
     }
