@@ -17,6 +17,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
     private var performancePolicy = PerformancePolicy.balanced
     @available(macOS 15.0, *)
     private var audioCapture: SystemAudioCaptureService?
+    private var nowPlayingPreferencesStore: NowPlayingPreferencesStore?
+    private var nowPlayingPreferences: NowPlayingPreferences = .defaults
+    private var appleMusicRunner = MusicAppScriptRunner()
+    private var spotifyRunner = SpotifyAppScriptRunner()
+    private var nowPlayingCoordinator: NowPlayingCoordinator?
+    private var nowPlayingPipeline: NowPlayingPipeline?
+    private var nowPlayingViewModel: NowPlayingViewModel?
+    private var nowPlayingWindowController: NowPlayingWindowController?
+    private var appleMusicProvider: AppleMusicProvider?
+    private var spotifyProvider: SpotifyProvider?
+    private var mediaRemoteProvider: MediaRemoteProvider?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -26,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
             library = LocalPackageLibrary(libraryURL: paths.packages, archiveService: archiveService)
             presetStore = PresetStore(fileURL: paths.presets)
             assignmentStore = DisplayAssignmentStore(fileURL: paths.assignments)
+            let nowPlayingStore = NowPlayingPreferencesStore(fileURL: paths.nowPlayingPreferences)
+            nowPlayingPreferencesStore = nowPlayingStore
+            nowPlayingPreferences = (try? nowPlayingStore.load()) ?? .defaults
 
             try installBundledSamplesIfNeeded()
             try reloadLibraryState()
@@ -33,6 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
             startAudioCaptureIfAvailable()
             showLibrary()
             try restoreAssignments()
+            if nowPlayingPreferences.isEnabled {
+                startNowPlaying()
+            }
         } catch {
             presentError(error)
         }
@@ -41,6 +58,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
             self,
             selector: #selector(screenParametersDidChange),
             name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemWillSleep),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification,
             object: nil
         )
     }
@@ -116,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         }
 
         libraryWindowController?.configure(packages: packages, presets: presets)
+        libraryWindowController?.configureNowPlaying(nowPlayingPreferences)
         libraryWindowController?.showWindow(nil)
         libraryWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -238,6 +268,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         libraryWindowController?.reloadDisplays()
     }
 
+    @objc private func systemWillSleep() {
+        guard nowPlayingPreferences.isEnabled else { return }
+        stopNowPlaying()
+    }
+
+    @objc private func systemDidWake() {
+        guard nowPlayingPreferences.isEnabled else { return }
+        startNowPlaying()
+    }
+
     func libraryWindowDidRequestImport(_ controller: LibraryWindowController) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -289,6 +329,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
             presentError(error)
         }
     }
+
+    func libraryWindow(_ controller: LibraryWindowController, didChange nowPlayingPreferences: NowPlayingPreferences) {
+        updateNowPlaying(preferences: nowPlayingPreferences)
+    }
+
+    private func startNowPlaying() {
+        guard nowPlayingCoordinator == nil else { return }
+        guard let nowPlayingPreferencesStore else { return }
+
+        let appleMusicProvider = AppleMusicProvider(runner: appleMusicRunner)
+        let spotifyProvider = SpotifyProvider(runner: spotifyRunner)
+        let mediaRemoteProvider = MediaRemoteProvider()
+        self.appleMusicProvider = appleMusicProvider
+        self.spotifyProvider = spotifyProvider
+        self.mediaRemoteProvider = mediaRemoteProvider
+
+        let coordinator = NowPlayingCoordinator(providers: [appleMusicProvider, spotifyProvider, mediaRemoteProvider])
+        nowPlayingCoordinator = coordinator
+
+        let pipeline = NowPlayingPipeline(upstream: coordinator.tracks, fetcher: ArtworkFetcher())
+        nowPlayingPipeline = pipeline
+
+        let viewModel = NowPlayingViewModel(
+            coordinator: coordinator,
+            pipeline: pipeline,
+            preferencesStore: nowPlayingPreferencesStore,
+            preferences: nowPlayingPreferences,
+            audioFeaturesProvider: { [weak self] in
+                self?.audioFeatures ?? .silent
+            }
+        )
+        viewModel.controlSender = { [weak self] command, source in
+            guard let self else { return }
+            switch source {
+            case .appleMusic:
+                try await self.appleMusicProvider?.send(command)
+            case .spotify:
+                try await self.spotifyProvider?.send(command)
+            case .mediaRemote:
+                return
+            }
+        }
+        nowPlayingViewModel = viewModel
+
+        let windowController = NowPlayingWindowController(viewModel: viewModel)
+        nowPlayingWindowController = windowController
+        viewModel.start()
+        windowController.show()
+    }
+
+    private func stopNowPlaying() {
+        nowPlayingWindowController?.hide()
+        nowPlayingViewModel?.stop()
+        nowPlayingWindowController = nil
+        nowPlayingViewModel = nil
+        nowPlayingPipeline = nil
+        nowPlayingCoordinator = nil
+        appleMusicProvider = nil
+        spotifyProvider = nil
+        mediaRemoteProvider = nil
+    }
+
+    private func updateNowPlaying(preferences: NowPlayingPreferences) {
+        let wasEnabled = nowPlayingPreferences.isEnabled
+        nowPlayingPreferences = preferences
+        try? nowPlayingPreferencesStore?.save(preferences)
+        nowPlayingViewModel?.update(preferences: preferences)
+        nowPlayingWindowController?.applySizeForCurrentStyle()
+
+        if preferences.isEnabled && !wasEnabled {
+            startNowPlaying()
+        } else if !preferences.isEnabled && wasEnabled {
+            stopNowPlaying()
+        }
+    }
 }
 
 private struct LunoAppPaths {
@@ -296,6 +411,7 @@ private struct LunoAppPaths {
     var packages: URL
     var presets: URL
     var assignments: URL
+    var nowPlayingPreferences: URL
 
     static func `default`() throws -> LunoAppPaths {
         let root = try FileManager.default.url(
@@ -309,7 +425,8 @@ private struct LunoAppPaths {
             root: root,
             packages: root.appending(path: "Packages", directoryHint: .isDirectory),
             presets: root.appending(path: "presets.json"),
-            assignments: root.appending(path: "assignments.json")
+            assignments: root.appending(path: "assignments.json"),
+            nowPlayingPreferences: root.appending(path: "now-playing.json")
         )
     }
 }

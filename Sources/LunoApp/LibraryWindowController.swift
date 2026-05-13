@@ -14,6 +14,7 @@ protocol LibraryWindowControllerDelegate: AnyObject {
         displayID: CGDirectDisplayID?
     )
     func libraryWindow(_ controller: LibraryWindowController, didSave preset: WallpaperPreset)
+    func libraryWindow(_ controller: LibraryWindowController, didChange nowPlayingPreferences: NowPlayingPreferences)
 }
 
 @MainActor
@@ -28,6 +29,11 @@ final class LibraryWindowController: NSWindowController {
     private let presetNameField = NSTextField()
     private let displayPopup = NSPopUpButton()
     private let parameterStack = NSStackView()
+    private var nowPlayingPreferences: NowPlayingPreferences = .defaults
+    private let nowPlayingEnableSwitch = NSSwitch()
+    private let nowPlayingStylePopup = NSPopUpButton()
+    private let nowPlayingReactivitySwitch = NSSwitch()
+    private let nowPlayingKeepVisibleSwitch = NSSwitch()
 
     convenience init() {
         let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 460))
@@ -49,6 +55,16 @@ final class LibraryWindowController: NSWindowController {
         reloadPackages()
         reloadDisplays()
         rebuildParameterControls()
+    }
+
+    func configureNowPlaying(_ preferences: NowPlayingPreferences) {
+        nowPlayingPreferences = preferences
+        nowPlayingEnableSwitch.state = preferences.isEnabled ? .on : .off
+        nowPlayingReactivitySwitch.state = preferences.audioReactivityEnabled ? .on : .off
+        nowPlayingKeepVisibleSwitch.state = preferences.keepVisibleWhilePaused ? .on : .off
+
+        let index = NowPlayingPreferences.Style.allCases.firstIndex(of: preferences.style) ?? 0
+        nowPlayingStylePopup.selectItem(at: index)
     }
 
     func reloadDisplays() {
@@ -109,6 +125,8 @@ final class LibraryWindowController: NSWindowController {
         buttonRow.addArrangedSubview(NSButton(title: "Import", target: self, action: #selector(importPackage)))
         buttonRow.addArrangedSubview(NSButton(title: "Export", target: self, action: #selector(exportPackage)))
         stack.addArrangedSubview(buttonRow)
+
+        buildNowPlayingSection(in: stack)
     }
 
     private func labeledRow(label: String, view: NSView) -> NSStackView {
@@ -121,6 +139,41 @@ final class LibraryWindowController: NSWindowController {
         labelView.widthAnchor.constraint(equalToConstant: 90).isActive = true
         row.addArrangedSubview(labelView)
         row.addArrangedSubview(view)
+        return row
+    }
+
+    private func buildNowPlayingSection(in stack: NSStackView) {
+        let heading = NSTextField(labelWithString: "Now Playing widget")
+        heading.font = .boldSystemFont(ofSize: 13)
+        stack.addArrangedSubview(heading)
+
+        nowPlayingEnableSwitch.target = self
+        nowPlayingEnableSwitch.action = #selector(nowPlayingToggleChanged)
+        stack.addArrangedSubview(labeled("Enable widget", control: nowPlayingEnableSwitch))
+
+        nowPlayingStylePopup.removeAllItems()
+        nowPlayingStylePopup.addItems(withTitles: ["A - Album-art dominant", "B - Compact bar", "C - Minimal"])
+        nowPlayingStylePopup.target = self
+        nowPlayingStylePopup.action = #selector(nowPlayingStyleChanged)
+        stack.addArrangedSubview(labeled("Style", control: nowPlayingStylePopup))
+
+        nowPlayingReactivitySwitch.target = self
+        nowPlayingReactivitySwitch.action = #selector(nowPlayingReactivityChanged)
+        stack.addArrangedSubview(labeled("React to music", control: nowPlayingReactivitySwitch))
+
+        nowPlayingKeepVisibleSwitch.target = self
+        nowPlayingKeepVisibleSwitch.action = #selector(nowPlayingKeepVisibleChanged)
+        stack.addArrangedSubview(labeled("Keep visible while paused", control: nowPlayingKeepVisibleSwitch))
+    }
+
+    private func labeled(_ title: String, control: NSControl) -> NSStackView {
+        let label = NSTextField(labelWithString: title)
+        label.widthAnchor.constraint(equalToConstant: 150).isActive = true
+
+        let row = NSStackView(views: [label, control])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
         return row
     }
 
@@ -261,6 +314,30 @@ final class LibraryWindowController: NSWindowController {
     @objc private func exportPackage() {
         guard let package = selectedPackage else { return }
         delegate?.libraryWindow(self, didRequestExport: package)
+    }
+
+    @objc private func nowPlayingToggleChanged(_ sender: NSSwitch) {
+        nowPlayingPreferences.isEnabled = sender.state == .on
+        delegate?.libraryWindow(self, didChange: nowPlayingPreferences)
+    }
+
+    @objc private func nowPlayingStyleChanged(_ sender: NSPopUpButton) {
+        let styles = NowPlayingPreferences.Style.allCases
+        let index = sender.indexOfSelectedItem
+        guard styles.indices.contains(index) else { return }
+
+        nowPlayingPreferences.style = styles[index]
+        delegate?.libraryWindow(self, didChange: nowPlayingPreferences)
+    }
+
+    @objc private func nowPlayingReactivityChanged(_ sender: NSSwitch) {
+        nowPlayingPreferences.audioReactivityEnabled = sender.state == .on
+        delegate?.libraryWindow(self, didChange: nowPlayingPreferences)
+    }
+
+    @objc private func nowPlayingKeepVisibleChanged(_ sender: NSSwitch) {
+        nowPlayingPreferences.keepVisibleWhilePaused = sender.state == .on
+        delegate?.libraryWindow(self, didChange: nowPlayingPreferences)
     }
 }
 
