@@ -16,4 +16,21 @@ final class AudioSpectrumAnalyzerTests: XCTestCase {
         XCTAssertGreaterThan(features.bass, features.treble)
         XCTAssertEqual(features.spectrum.count, 64)
     }
+
+    func testUnsafeBufferFeatureAnalysisIncludesSpectrum() {
+        let analyzer = AudioSpectrumAnalyzer()
+        let sampleRate = 4_800.0
+        let samples = (0..<4_800).map { index in
+            Float(sin(2.0 * Double.pi * 80.0 * Double(index) / sampleRate))
+        }
+
+        let features = samples.withUnsafeBufferPointer {
+            analyzer.analyzeFeatures(samples: $0, sampleRate: sampleRate)
+        }
+
+        XCTAssertGreaterThan(features.rms, 0.65)
+        XCTAssertGreaterThan(features.bass, features.mid)
+        XCTAssertEqual(features.spectrum.count, 64)
+        XCTAssertGreaterThan(features.spectrum.max() ?? 0, 0)
+    }
 }

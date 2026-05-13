@@ -10,27 +10,20 @@ public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStream
     private let lock = NSLock()
     private let analyzer = AudioSpectrumAnalyzer()
     private var stream: SCStream?
-    private var latestScalars = AudioScalars.silent
+    private var latestFeatures = AudioFeatures.silent
 
     public override init() {
         super.init()
     }
 
     public var scalars: AudioScalars {
-        lock.lock()
-        defer { lock.unlock() }
-        return latestScalars
+        features.scalars
     }
 
     public var features: AudioFeatures {
-        let snapshot = scalars
-        return AudioFeatures(
-            rms: snapshot.rms,
-            bass: snapshot.bass,
-            mid: snapshot.mid,
-            treble: snapshot.treble,
-            spectrum: AudioFeatures.silent.spectrum
-        )
+        lock.lock()
+        defer { lock.unlock() }
+        return latestFeatures
     }
 
     @MainActor
@@ -72,9 +65,9 @@ public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStream
 
         withFloatSamples(from: sampleBuffer) { buffer in
             guard !buffer.isEmpty else { return }
-            let scalars = analyzer.analyzeScalars(samples: buffer, sampleRate: sampleRate)
+            let features = analyzer.analyzeFeatures(samples: buffer, sampleRate: sampleRate)
             lock.lock()
-            latestScalars = scalars
+            latestFeatures = features
             lock.unlock()
         }
     }

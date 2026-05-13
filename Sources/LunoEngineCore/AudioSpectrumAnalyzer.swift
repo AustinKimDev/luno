@@ -129,17 +129,24 @@ public struct AudioSpectrumAnalyzer: Sendable {
         return 2.0 * mag / Float(count)
     }
 
+    public func analyzeFeatures(
+        samples: UnsafeBufferPointer<Float>,
+        sampleRate: Double
+    ) -> AudioFeatures {
+        let scalars = analyzeScalars(samples: samples, sampleRate: sampleRate)
+        let spectrum = makeSpectrum(samples: samples, sampleRate: sampleRate, rms: scalars.rms, binCount: 64)
+        return AudioFeatures(
+            rms: scalars.rms,
+            bass: scalars.bass,
+            mid: scalars.mid,
+            treble: scalars.treble,
+            spectrum: spectrum
+        )
+    }
+
     public func analyze(samples: [Float], sampleRate: Double) -> AudioFeatures {
         samples.withUnsafeBufferPointer { buffer in
-            let scalars = analyzeScalars(samples: buffer, sampleRate: sampleRate)
-            let spectrum = makeSpectrum(samples: buffer, sampleRate: sampleRate, rms: scalars.rms, binCount: 64)
-            return AudioFeatures(
-                rms: scalars.rms,
-                bass: scalars.bass,
-                mid: scalars.mid,
-                treble: scalars.treble,
-                spectrum: spectrum
-            )
+            analyzeFeatures(samples: buffer, sampleRate: sampleRate)
         }
     }
 
