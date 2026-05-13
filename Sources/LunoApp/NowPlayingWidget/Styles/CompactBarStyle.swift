@@ -1,4 +1,5 @@
 import Foundation
+import LunoEngineCore
 import SwiftUI
 
 struct CompactBarStyle: View {
@@ -8,6 +9,7 @@ struct CompactBarStyle: View {
     let composer: String?
     let artworkData: Data?
     let pulseAmplitude: Double
+    let appearance: NowPlayingAppearance
     let isHovering: Bool
     let canControl: Bool
     let onCommand: (NowPlayingControlIntent) -> Void
@@ -18,19 +20,19 @@ struct CompactBarStyle: View {
                 .frame(width: 48, height: 48)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 13, weight: appearance.titleWeight.swiftUIWeight))
+                    .foregroundStyle(Color(hexString: appearance.textColor))
                     .lineLimit(1)
                 if let secondary = secondaryLine {
                     Text(secondary)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .font(.system(size: 11, weight: appearance.subtitleWeight.swiftUIWeight))
+                        .foregroundStyle(Color(hexString: appearance.textColor).opacity(0.7))
                         .lineLimit(1)
                 }
                 if let composer, !composer.isEmpty {
                     Text(composer)
-                        .font(.system(size: 10).italic())
-                        .foregroundStyle(.white.opacity(0.45))
+                        .font(.system(size: 10, weight: appearance.subtitleWeight.swiftUIWeight).italic())
+                        .foregroundStyle(Color(hexString: appearance.textColor).opacity(0.45))
                         .lineLimit(1)
                 }
             }

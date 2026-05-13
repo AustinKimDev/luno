@@ -7,8 +7,11 @@ final class NowPlayingWindowController: NSWindowController {
     private static let widgetLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
 
     private let viewModel: NowPlayingViewModel
-    private var hostingView: NSHostingView<RootContainer>?
+    private var hostingView: NowPlayingHostingView<RootContainer>?
     private var savePositionTimer: Timer?
+    private var globalMouseMonitor: Any?
+    private var localMouseMonitor: Any?
+    private var currentlyIgnoresMouse = false
 
     init(viewModel: NowPlayingViewModel) {
         self.viewModel = viewModel
@@ -32,7 +35,8 @@ final class NowPlayingWindowController: NSWindowController {
         window.delegate = self
 
         let root = RootContainer(viewModel: viewModel, windowController: self)
-        let host = NSHostingView(rootView: root)
+        let host = NowPlayingHostingView(rootView: root)
+        host.widgetSize = viewModel.preferences.style.widgetSize
         window.contentView = host
         hostingView = host
     }
@@ -46,18 +50,67 @@ final class NowPlayingWindowController: NSWindowController {
         applySizeForCurrentStyle()
         applyPresentationMode()
         window?.orderFrontRegardless()
+        startClickThroughTracking()
+        updateClickThroughForCursor(NSEvent.mouseLocation)
     }
 
     func hide() {
+        stopClickThroughTracking()
         window?.orderOut(nil)
+    }
+
+    private func startClickThroughTracking() {
+        stopClickThroughTracking()
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.updateClickThroughForCursor(NSEvent.mouseLocation)
+            }
+        }
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+            guard let self else { return event }
+            Task { @MainActor in
+                self.updateClickThroughForCursor(NSEvent.mouseLocation)
+            }
+            return event
+        }
+    }
+
+    private func stopClickThroughTracking() {
+        if let globalMouseMonitor {
+            NSEvent.removeMonitor(globalMouseMonitor)
+            self.globalMouseMonitor = nil
+        }
+        if let localMouseMonitor {
+            NSEvent.removeMonitor(localMouseMonitor)
+            self.localMouseMonitor = nil
+        }
+    }
+
+    private func updateClickThroughForCursor(_ screenPoint: NSPoint) {
+        guard let window, window.isVisible else { return }
+        let windowFrame = window.frame
+        let margin = NowPlayingPreferences.Style.glowMargin
+        let widgetSize = viewModel.preferences.style.widgetSize
+        let widgetRect = CGRect(
+            x: windowFrame.origin.x + margin,
+            y: windowFrame.origin.y + margin,
+            width: widgetSize.width,
+            height: widgetSize.height
+        )
+        let shouldIgnore = !widgetRect.contains(screenPoint)
+        guard shouldIgnore != currentlyIgnoresMouse else { return }
+        currentlyIgnoresMouse = shouldIgnore
+        window.ignoresMouseEvents = shouldIgnore
     }
 
     func applySizeForCurrentStyle() {
         guard let window else { return }
-        let size = viewModel.preferences.style.widgetSize
+        let size = viewModel.preferences.style.windowSize
         var frame = window.frame
         frame.size = size
         window.setFrame(frame, display: true, animate: false)
+        hostingView?.widgetSize = viewModel.preferences.style.widgetSize
     }
 
     func togglePinned() {
@@ -99,7 +152,7 @@ final class NowPlayingWindowController: NSWindowController {
             ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let displayIDs = NSScreen.screens.compactMap(\.lunoDisplayID).map(String.init)
         let preferredDisplayID = displayIDs.first { viewModel.preferences.positionsByDisplay[$0] != nil }
-        let size = viewModel.preferences.style.widgetSize
+        let size = viewModel.preferences.style.windowSize
 
         let position: NSPoint
         if let preferredDisplayID, let saved = viewModel.preferences.positionsByDisplay[preferredDisplayID] {
@@ -128,6 +181,25 @@ private final class NowPlayingFloatingWindow: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+@MainActor
+final class NowPlayingHostingView<Content: View>: NSHostingView<Content> {
+    var widgetSize: CGSize = .zero
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // point is in the superview's coordinate space. For a window's contentView this
+        // matches the contentView's local coordinates (origin at bottom-left).
+        let margin = NowPlayingPreferences.Style.glowMargin
+        let widgetRect = CGRect(
+            x: margin,
+            y: margin,
+            width: widgetSize.width,
+            height: widgetSize.height
+        )
+        guard widgetRect.contains(point) else { return nil }
+        return super.hitTest(point)
+    }
+}
+
 extension NowPlayingWindowController: NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         savePositionTimer?.invalidate()
@@ -144,12 +216,14 @@ private struct RootContainer: View {
     weak var windowController: NowPlayingWindowController?
 
     var body: some View {
-        Group {
+        let widgetSize = viewModel.preferences.style.widgetSize
+        return Group {
             if let track = viewModel.track {
                 NowPlayingWidgetView(
                     style: viewModel.preferences.style,
                     track: track,
                     pulseAmplitude: viewModel.pulseAmplitude,
+                    appearance: viewModel.preferences.appearance,
                     isHovering: viewModel.isHovering,
                     canControl: track.source != .mediaRemote && !track.isAdvertisement,
                     onCommand: { intent in viewModel.send(intent) }
@@ -176,6 +250,8 @@ private struct RootContainer: View {
             .help(viewModel.preferences.isPinned ? "Unpin widget" : "Pin above apps and full screen spaces")
             .padding(6)
         }
+        .frame(width: widgetSize.width, height: widgetSize.height)
+        .padding(NowPlayingPreferences.Style.glowMargin)
     }
 }
 
@@ -209,6 +285,5 @@ private struct WaitingForMusicView: View {
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: 8)
     }
 }

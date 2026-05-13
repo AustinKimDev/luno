@@ -161,7 +161,7 @@ final class NowPlayingViewModel {
                 guard let self else { return }
                 let features = audioFeaturesProvider()
                 let hoverScale = isHovering ? 0.3 : 1.0
-                let strength = preferences.audioReactivityEnabled ? 0.5 : 0
+                let strength = preferences.audioReactivityEnabled ? preferences.audioReactivityIntensity : 0
                 pulseAmplitude = Double(features.bass) * strength * hoverScale
             }
         }

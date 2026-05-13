@@ -6,8 +6,6 @@ struct ArtworkView: View {
     let pulseAmplitude: Double
     let cornerRadius: CGFloat
 
-    @State private var animatedScale: CGFloat = 1.0
-
     var body: some View {
         ZStack {
             if let imageData, let image = NSImage(data: imageData) {
@@ -25,17 +23,6 @@ struct ArtworkView: View {
                 )
             }
         }
-        .scaleEffect(animatedScale)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .shadow(
-            color: .white.opacity(min(max(pulseAmplitude, 0), 1) * 0.18),
-            radius: min(max(pulseAmplitude, 0), 1) * 10
-        )
-        .onChange(of: pulseAmplitude) { _, newValue in
-            let target = 1.0 + min(max(newValue, 0), 1) * 0.08
-            withAnimation(.spring(response: 0.18, dampingFraction: 0.6)) {
-                animatedScale = target
-            }
-        }
     }
 }

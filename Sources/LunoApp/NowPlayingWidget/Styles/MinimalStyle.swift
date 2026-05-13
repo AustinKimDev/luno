@@ -1,4 +1,5 @@
 import Foundation
+import LunoEngineCore
 import SwiftUI
 
 struct MinimalStyle: View {
@@ -6,6 +7,7 @@ struct MinimalStyle: View {
     let artist: String?
     let artworkData: Data?
     let pulseAmplitude: Double
+    let appearance: NowPlayingAppearance
     let isHovering: Bool
     let canControl: Bool
     let onCommand: (NowPlayingControlIntent) -> Void
@@ -16,13 +18,13 @@ struct MinimalStyle: View {
                 .frame(width: 28, height: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 12, weight: appearance.titleWeight.swiftUIWeight))
+                    .foregroundStyle(Color(hexString: appearance.textColor))
                     .lineLimit(1)
                 if let artist {
                     Text(artist)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .font(.system(size: 11, weight: appearance.subtitleWeight.swiftUIWeight))
+                        .foregroundStyle(Color(hexString: appearance.textColor).opacity(0.7))
                         .lineLimit(1)
                 }
             }
