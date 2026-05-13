@@ -432,6 +432,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SettingsWindowControll
                 self?.audioFeatures ?? .silent
             }
         )
+        viewModel.albumPalette = albumPalette
         viewModel.onPreferencesChanged = { [weak self] preferences in
             self?.nowPlayingPreferences = preferences
             self?.settingsWindowController?.configureNowPlaying(preferences)
@@ -475,6 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SettingsWindowControll
                     return
                 }
                 self.albumPalette = palette
+                self.nowPlayingViewModel?.albumPalette = palette
             }
         }
     }

@@ -341,7 +341,7 @@ private final class MetalWallpaperView: MTKView {
 
 @MainActor
 private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
-    private static let overlayBarCount = 32
+    private static let overlayBarCount = 96
 
     private let commandQueue: any MTLCommandQueue
     private let pipelineState: any MTLRenderPipelineState
@@ -497,6 +497,12 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         if usesAudioReactor,
            audioReactorPreferences.shouldDrawOverlay,
            let overlayPipelineState {
+            let style = audioReactorPreferences.style
+            let overlayPalette = style.palette.resolved(with: albumPalette)
+            let barCount = min(max(style.spectrum.barCount, 8), Self.overlayBarCount)
+            if overlaySpectrum.count != barCount {
+                overlaySpectrum = Array(repeating: 0, count: barCount)
+            }
             downsampleShapedSpectrum(rawAudio.spectrum, preferences: audioReactorPreferences)
             var overlayUniforms = LunoOverlayUniforms(
                 resolution: viewportSize,
@@ -508,7 +514,53 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
                 overlayOpacity: Float(AudioReactorPreferences.clamp(audioReactorPreferences.overlayOpacity)),
                 bassPulseStrength: Float(AudioReactorPreferences.clamp(audioReactorPreferences.bassPulseStrength)),
                 flags: audioReactorPreferences.overlayFlags,
-                barCount: UInt32(Self.overlayBarCount)
+                barCount: UInt32(barCount),
+                palettePrimary: Self.normalizedColor(from: overlayPalette.primaryColor),
+                paletteSecondary: Self.normalizedColor(from: overlayPalette.secondaryColor),
+                paletteAccent: Self.normalizedColor(from: overlayPalette.accentColor),
+                paletteGlow: Self.normalizedColor(from: overlayPalette.glowColor),
+                ringStyle: SIMD4<Float>(
+                    Float(style.ring.radius),
+                    Float(style.ring.thickness),
+                    Float(style.ring.softness),
+                    Float(style.ring.glow)
+                ),
+                ringStyle2: SIMD4<Float>(
+                    Float(style.ring.roundness),
+                    0,
+                    0,
+                    0
+                ),
+                spectrumStyle0: SIMD4<Float>(
+                    style.spectrum.layout.overlayCode,
+                    Float(style.spectrum.barWidth),
+                    Float(style.spectrum.barHeight),
+                    Float(style.spectrum.spacing)
+                ),
+                spectrumStyle1: SIMD4<Float>(
+                    Float(style.spectrum.radius),
+                    Float(style.spectrum.roundness),
+                    Float(style.spectrum.smoothing),
+                    Float(style.spectrum.glow)
+                ),
+                spectrumStyle2: SIMD4<Float>(
+                    Float(style.spectrum.arcStartDegrees * .pi / 180),
+                    Float(style.spectrum.arcEndDegrees * .pi / 180),
+                    0,
+                    0
+                ),
+                waveStyle0: SIMD4<Float>(
+                    style.wave.layout.overlayCode,
+                    Float(style.wave.thickness),
+                    Float(style.wave.amplitude),
+                    Float(style.wave.smoothing)
+                ),
+                waveStyle1: SIMD4<Float>(
+                    Float(style.wave.glow),
+                    Float(style.wave.radius),
+                    Float(style.wave.arcStartDegrees * .pi / 180),
+                    Float(style.wave.arcEndDegrees * .pi / 180)
+                )
             )
 
             encoder.setRenderPipelineState(overlayPipelineState)
@@ -590,6 +642,20 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    private static func normalizedColor(from hexString: String) -> SIMD4<Float> {
+        let hex = hexString.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard hex.count == 6, let value = UInt32(hex, radix: 16) else {
+            return SIMD4<Float>(1, 1, 1, 1)
+        }
+
+        return SIMD4<Float>(
+            Float((value >> 16) & 0xFF) / 255,
+            Float((value >> 8) & 0xFF) / 255,
+            Float(value & 0xFF) / 255,
+            1
+        )
+    }
+
     func resetTiming() {
         lastTime = CACurrentMediaTime()
     }
@@ -612,6 +678,17 @@ internal enum LunoOverlayShaderSource {
         float bassPulseStrength;
         uint flags;
         uint barCount;
+        float4 palettePrimary;
+        float4 paletteSecondary;
+        float4 paletteAccent;
+        float4 paletteGlow;
+        float4 ringStyle;
+        float4 ringStyle2;
+        float4 spectrumStyle0;
+        float4 spectrumStyle1;
+        float4 spectrumStyle2;
+        float4 waveStyle0;
+        float4 waveStyle1;
     };
 
     struct OverlayVertexOut {
@@ -652,6 +729,30 @@ internal enum LunoOverlayShaderSource {
         return 1.0 - smoothstep(0.0, feather, distance);
     }
 
+    static float arcProgress(float angle, float start, float end, bool circle, thread bool &inside) {
+        if (circle) {
+            inside = true;
+            return (angle + 3.14159265) / 6.28318530;
+        }
+
+        float span = end - start;
+        if (abs(span) < 0.001) {
+            inside = false;
+            return 0.0;
+        }
+        float progress = (angle - start) / span;
+        inside = progress >= 0.0 && progress <= 1.0;
+        return clamp(progress, 0.0, 1.0);
+    }
+
+    static bool isBottomLayout(float code) {
+        return abs(code - 0.0) < 0.25;
+    }
+
+    static bool isCircleLayout(float code) {
+        return abs(code - 1.0) < 0.25;
+    }
+
     fragment half4 lunoOverlayFragment(
         OverlayVertexOut in [[stage_in]],
         constant OverlayUniforms &uniforms [[buffer(0)]],
@@ -659,84 +760,158 @@ internal enum LunoOverlayShaderSource {
     ) {
         float2 uv = in.uv;
         float opacity = clamp(uniforms.overlayOpacity, 0.0, 1.0);
-        uint count = min(uniforms.barCount, 32u);
+        uint count = min(uniforms.barCount, 96u);
         float pixel = 1.4 / max(min(uniforms.resolution.x, uniforms.resolution.y), 1.0);
         float energy = clamp(uniforms.rms * 0.55 + uniforms.bass * 0.45, 0.0, 1.0);
-        float3 cyan = float3(0.14, 0.78, 1.0);
-        float3 violet = float3(0.63, 0.38, 1.0);
-        float3 coral = float3(1.0, 0.47, 0.36);
-        float3 coolAccent = mix(cyan, violet, clamp(uniforms.mid * 0.55 + uniforms.treble * 0.45, 0.0, 1.0));
-        float3 warmAccent = mix(coolAccent, coral, uniforms.bass * 0.35);
+        float3 primary = clamp(uniforms.palettePrimary.rgb, float3(0.0), float3(1.0));
+        float3 secondary = clamp(uniforms.paletteSecondary.rgb, float3(0.0), float3(1.0));
+        float3 accent = clamp(uniforms.paletteAccent.rgb, float3(0.0), float3(1.0));
+        float3 glowColor = clamp(uniforms.paletteGlow.rgb, float3(0.0), float3(1.0));
+        float3 coolAccent = mix(primary, secondary, clamp(uniforms.mid * 0.55 + uniforms.treble * 0.45, 0.0, 1.0));
+        float3 warmAccent = mix(coolAccent, accent, uniforms.bass * 0.35);
         float3 accumulatedColor = float3(0.0);
         float accumulatedAlpha = 0.0;
+        float aspect = max(uniforms.resolution.x / max(uniforms.resolution.y, 1.0), 0.1);
+        float2 centered = (uv - float2(0.5, 0.53)) * float2(aspect, 1.0);
+        float distanceFromCenter = length(centered);
+        float angle = atan2(centered.y, centered.x);
 
         if ((uniforms.flags & 1u) != 0u) {
-            float aspect = max(uniforms.resolution.x / max(uniforms.resolution.y, 1.0), 0.1);
-            float2 centered = (uv - float2(0.5, 0.53)) * float2(aspect, 1.0);
-            float distanceFromCenter = length(centered);
             float strength = clamp(uniforms.bassPulseStrength, 0.0, 1.0);
-            float radius = 0.17 + uniforms.bass * 0.10 * strength;
-            float ringWidth = 0.006 + uniforms.rms * 0.018;
-            float angle = atan2(centered.y, centered.x);
-            float shimmer = 0.78 + 0.22 * sin(angle * 10.0 - uniforms.time * 1.35 + uniforms.treble * 4.0);
+            float radius = mix(0.16, 0.46, clamp(uniforms.ringStyle.x, 0.0, 1.0)) + uniforms.bass * 0.08 * strength;
+            float ringWidth = max(pixel * 2.0, 0.003 + clamp(uniforms.ringStyle.y, 0.0, 0.08) + uniforms.rms * 0.012);
+            float softness = pixel * 2.0 + clamp(uniforms.ringStyle.z, 0.0, 1.0) * 0.035;
+            float glow = clamp(uniforms.ringStyle.w, 0.0, 1.0);
+            float roundness = clamp(uniforms.ringStyle2.x, 0.0, 1.0);
+            float shimmer = mix(1.0, 0.78 + 0.22 * sin(angle * 10.0 - uniforms.time * 1.35 + uniforms.treble * 4.0), roundness);
             float outerRing = 1.0 - smoothstep(ringWidth, ringWidth + pixel * 5.0, abs(distanceFromCenter - radius));
-            float innerRing = 1.0 - smoothstep(ringWidth * 0.65, ringWidth * 0.65 + pixel * 4.0, abs(distanceFromCenter - radius * 0.68));
-            float halo = pow(1.0 - smoothstep(0.0, 0.34 + uniforms.bass * 0.08, distanceFromCenter), 2.8);
+            float innerRing = 1.0 - smoothstep(ringWidth * 0.65, ringWidth * 0.65 + softness, abs(distanceFromCenter - radius * mix(0.58, 0.72, roundness)));
+            float halo = pow(1.0 - smoothstep(0.0, radius + 0.18 + uniforms.bass * 0.08, distanceFromCenter), 2.8);
             float aperture = smoothstep(0.045, 0.16, distanceFromCenter);
             float pulseAlpha = (
                 outerRing * (0.38 + uniforms.bass * 0.34) * shimmer
-                + innerRing * 0.12
-                + halo * aperture * (0.13 + energy * 0.12)
+                + innerRing * (0.05 + roundness * 0.12)
+                + halo * aperture * (0.04 + glow * 0.18 + energy * 0.08)
             ) * strength;
-            float3 pulseColor = mix(coolAccent, warmAccent, uniforms.bass * 0.45);
+            float3 pulseColor = mix(coolAccent, mix(warmAccent, glowColor, 0.35), uniforms.bass * 0.45);
             accumulatedColor += pulseColor * pulseAlpha;
             accumulatedAlpha += pulseAlpha;
         }
 
         if (((uniforms.flags & 2u) != 0u) && count > 0) {
-            float railStart = 0.075;
-            float railWidth = 0.85;
-            float railX = (uv.x - railStart) / railWidth;
-            float edgeFade = smoothstep(0.0, 0.065, railX) * (1.0 - smoothstep(0.935, 1.0, railX));
-            if (railX >= 0.0 && railX <= 1.0) {
-                float cell = railX * float(count);
-                uint index = min(uint(floor(cell)), count - 1);
-                float value = clamp(spectrum[index], 0.0, 1.0);
-                float cellWidth = railWidth / float(count);
-                float barCenterX = railStart + (float(index) + 0.5) * cellWidth;
-                float baseY = 0.058;
-                float barHeight = 0.018 + pow(value, 0.72) * 0.215;
-                float2 center = float2(barCenterX, baseY + barHeight * 0.5);
-                float2 halfSize = float2(cellWidth * 0.27, barHeight * 0.5);
-                float radius = min(halfSize.x * 0.95, max(pixel * 3.0, halfSize.y * 0.2));
-                float core = roundedBoxMask(uv - center, halfSize, radius, pixel * 1.7);
-                float glow = roundedBoxMask(uv - center, halfSize + float2(cellWidth * 0.12, 0.024 + value * 0.022), radius + pixel * 5.0, pixel * 7.0);
-                float rail = (1.0 - smoothstep(pixel, pixel * 5.0, abs(uv.y - baseY))) * edgeFade;
-                float mist = (1.0 - smoothstep(baseY, baseY + 0.34, uv.y)) * edgeFade * energy;
-                float3 barColor = mix(cyan, violet, clamp(value * 0.75 + uniforms.treble * 0.25, 0.0, 1.0));
-                float barAlpha = (core * (0.32 + value * 0.48) + glow * (0.08 + value * 0.12)) * edgeFade;
-                accumulatedColor += barColor * barAlpha;
-                accumulatedAlpha += barAlpha;
-                accumulatedColor += coolAccent * (rail * 0.12 + mist * 0.055);
-                accumulatedAlpha += rail * 0.10 + mist * 0.035;
+            float layout = uniforms.spectrumStyle0.x;
+            float barWidthControl = clamp(uniforms.spectrumStyle0.y, 0.0, 1.0);
+            float barHeightControl = clamp(uniforms.spectrumStyle0.z, 0.0, 1.0);
+            float spacing = clamp(uniforms.spectrumStyle0.w, 0.0, 1.0);
+            float radiusControl = clamp(uniforms.spectrumStyle1.x, 0.0, 1.0);
+            float roundness = clamp(uniforms.spectrumStyle1.y, 0.0, 1.0);
+            float smoothing = clamp(uniforms.spectrumStyle1.z, 0.0, 1.0);
+            float glow = clamp(uniforms.spectrumStyle1.w, 0.0, 1.0);
+
+            if (isBottomLayout(layout)) {
+                float railStart = 0.075;
+                float railWidth = 0.85;
+                float railX = (uv.x - railStart) / railWidth;
+                float edgeFade = smoothstep(0.0, 0.065, railX) * (1.0 - smoothstep(0.935, 1.0, railX));
+                if (railX >= 0.0 && railX <= 1.0) {
+                    float cell = railX * float(count);
+                    uint index = min(uint(floor(cell)), count - 1);
+                    float rawValue = clamp(spectrum[index], 0.0, 1.0);
+                    float value = pow(rawValue, mix(0.55, 1.28, smoothing));
+                    float cellWidth = railWidth / float(count);
+                    float barCenterX = railStart + (float(index) + 0.5) * cellWidth;
+                    float baseY = 0.058;
+                    float barHeight = 0.012 + value * (0.06 + barHeightControl * 0.24);
+                    float2 center = float2(barCenterX, baseY + barHeight * 0.5);
+                    float widthScale = (0.12 + barWidthControl * 0.66) * (1.15 - spacing * 0.62);
+                    float2 halfSize = float2(cellWidth * widthScale * 0.5, barHeight * 0.5);
+                    float corner = max(pixel * 2.0, min(halfSize.x, halfSize.y) * roundness);
+                    float core = roundedBoxMask(uv - center, halfSize, corner, pixel * 1.7);
+                    float glowMask = roundedBoxMask(
+                        uv - center,
+                        halfSize + float2(cellWidth * (0.04 + glow * 0.16), (0.012 + value * 0.03) * glow),
+                        corner + pixel * 5.0,
+                        pixel * (3.0 + glow * 8.0)
+                    );
+                    float rail = (1.0 - smoothstep(pixel, pixel * 5.0, abs(uv.y - baseY))) * edgeFade;
+                    float mist = (1.0 - smoothstep(baseY, baseY + 0.34, uv.y)) * edgeFade * energy * glow;
+                    float3 barColor = mix(primary, secondary, clamp(value * 0.75 + uniforms.treble * 0.25, 0.0, 1.0));
+                    float barAlpha = (core * (0.28 + value * 0.56) + glowMask * glow * (0.04 + value * 0.16)) * edgeFade;
+                    accumulatedColor += barColor * barAlpha;
+                    accumulatedAlpha += barAlpha;
+                    accumulatedColor += glowColor * (rail * 0.10 * glow + mist * 0.055);
+                    accumulatedAlpha += rail * 0.08 * glow + mist * 0.035;
+                }
+            } else {
+                bool insideArc;
+                bool circle = isCircleLayout(layout);
+                float progress = arcProgress(angle, uniforms.spectrumStyle2.x, uniforms.spectrumStyle2.y, circle, insideArc);
+                if (insideArc) {
+                    float cell = progress * float(count);
+                    uint index = min(uint(floor(cell)), count - 1);
+                    float rawValue = clamp(spectrum[index], 0.0, 1.0);
+                    float value = pow(rawValue, mix(0.55, 1.28, smoothing));
+                    float local = abs(fract(cell) - 0.5);
+                    float fill = clamp((0.18 + barWidthControl * 0.78) * (1.08 - spacing * 0.72), 0.04, 0.96);
+                    float angularMask = 1.0 - smoothstep(fill * 0.5, fill * 0.5 + 0.045, local);
+                    float baseRadius = mix(0.17, 0.54, radiusControl);
+                    float length = 0.018 + value * (0.055 + barHeightControl * 0.26);
+                    float radial = distanceFromCenter - baseRadius;
+                    float core = smoothstep(0.0, pixel * 3.0, radial) * (1.0 - smoothstep(length, length + pixel * (4.0 + roundness * 6.0), radial));
+                    float glowMask = smoothstep(-0.035 * glow, pixel * 2.0, radial)
+                        * (1.0 - smoothstep(length + 0.018 * glow, length + pixel * (8.0 + glow * 16.0) + 0.05 * glow, radial));
+                    float arcEdgeFade = circle ? 1.0 : smoothstep(0.0, 0.045, progress) * (1.0 - smoothstep(0.955, 1.0, progress));
+                    float3 barColor = mix(primary, accent, clamp(progress * 0.72 + value * 0.28, 0.0, 1.0));
+                    float barAlpha = (core * (0.30 + value * 0.52) + glowMask * glow * (0.04 + value * 0.14)) * angularMask * arcEdgeFade;
+                    accumulatedColor += barColor * barAlpha;
+                    accumulatedAlpha += barAlpha;
+                }
             }
         }
 
         if (((uniforms.flags & 4u) != 0u) && count > 0) {
-            float railStart = 0.075;
-            float railWidth = 0.85;
-            float railX = (uv.x - railStart) / railWidth;
-            float edgeFade = smoothstep(0.0, 0.07, railX) * (1.0 - smoothstep(0.93, 1.0, railX));
-            if (railX >= 0.0 && railX <= 1.0) {
-                float value = sampleSpectrum(spectrum, count, railX);
-                float drift = sin(railX * 9.0 + uniforms.time * 0.55) * 0.006 * (0.35 + uniforms.treble);
-                float waveY = 0.23 + value * 0.21 + drift;
-                float lineWidth = 0.0024 + uniforms.rms * 0.006;
-                float line = 1.0 - smoothstep(lineWidth, lineWidth + pixel * 4.0, abs(uv.y - waveY));
-                float glow = 1.0 - smoothstep(lineWidth * 2.0, lineWidth * 9.0 + pixel * 4.0, abs(uv.y - waveY));
-                float waveAlpha = (line * (0.34 + value * 0.34) + glow * (0.08 + value * 0.10)) * edgeFade;
-                accumulatedColor += mix(cyan, warmAccent, value * 0.42) * waveAlpha;
-                accumulatedAlpha += waveAlpha;
+            float layout = uniforms.waveStyle0.x;
+            float thickness = clamp(uniforms.waveStyle0.y, 0.0, 0.08);
+            float amplitude = clamp(uniforms.waveStyle0.z, 0.0, 1.0);
+            float smoothing = clamp(uniforms.waveStyle0.w, 0.0, 1.0);
+            float glow = clamp(uniforms.waveStyle1.x, 0.0, 1.0);
+            float radiusControl = clamp(uniforms.waveStyle1.y, 0.0, 1.0);
+
+            if (isBottomLayout(layout)) {
+                float railStart = 0.075;
+                float railWidth = 0.85;
+                float railX = (uv.x - railStart) / railWidth;
+                float edgeFade = smoothstep(0.0, 0.07, railX) * (1.0 - smoothstep(0.93, 1.0, railX));
+                if (railX >= 0.0 && railX <= 1.0) {
+                    float rawValue = sampleSpectrum(spectrum, count, railX);
+                    float value = pow(rawValue, mix(0.58, 1.35, smoothing));
+                    float drift = sin(railX * 9.0 + uniforms.time * 0.55) * 0.006 * (0.35 + uniforms.treble);
+                    float waveY = 0.17 + value * (0.07 + amplitude * 0.26) + drift;
+                    float lineWidth = max(pixel * 1.2, 0.0014 + thickness + uniforms.rms * 0.004);
+                    float line = 1.0 - smoothstep(lineWidth, lineWidth + pixel * 4.0, abs(uv.y - waveY));
+                    float glowMask = 1.0 - smoothstep(lineWidth * 2.0, lineWidth * (4.0 + glow * 10.0) + pixel * 4.0, abs(uv.y - waveY));
+                    float waveAlpha = (line * (0.28 + value * 0.42) + glowMask * glow * (0.04 + value * 0.14)) * edgeFade;
+                    accumulatedColor += mix(glowColor, warmAccent, value * 0.42) * waveAlpha;
+                    accumulatedAlpha += waveAlpha;
+                }
+            } else {
+                bool insideArc;
+                bool circle = isCircleLayout(layout);
+                float progress = arcProgress(angle, uniforms.waveStyle1.z, uniforms.waveStyle1.w, circle, insideArc);
+                if (insideArc) {
+                    float rawValue = sampleSpectrum(spectrum, count, progress);
+                    float value = pow(rawValue, mix(0.58, 1.35, smoothing));
+                    float drift = sin(progress * 18.0 + uniforms.time * 0.55) * 0.006 * (0.35 + uniforms.treble);
+                    float baseRadius = mix(0.16, 0.56, radiusControl);
+                    float waveRadius = baseRadius + value * (0.035 + amplitude * 0.22) + drift;
+                    float lineWidth = max(pixel * 1.3, 0.0014 + thickness + uniforms.rms * 0.004);
+                    float line = 1.0 - smoothstep(lineWidth, lineWidth + pixel * 4.0, abs(distanceFromCenter - waveRadius));
+                    float glowMask = 1.0 - smoothstep(lineWidth * 2.0, lineWidth * (4.0 + glow * 10.0) + pixel * 4.0, abs(distanceFromCenter - waveRadius));
+                    float arcEdgeFade = circle ? 1.0 : smoothstep(0.0, 0.045, progress) * (1.0 - smoothstep(0.955, 1.0, progress));
+                    float waveAlpha = (line * (0.30 + value * 0.42) + glowMask * glow * (0.04 + value * 0.14)) * arcEdgeFade;
+                    accumulatedColor += mix(glowColor, warmAccent, value * 0.42) * waveAlpha;
+                    accumulatedAlpha += waveAlpha;
+                }
             }
         }
 
@@ -778,6 +953,17 @@ private struct LunoOverlayUniforms {
     var bassPulseStrength: Float
     var flags: UInt32
     var barCount: UInt32
+    var palettePrimary: SIMD4<Float>
+    var paletteSecondary: SIMD4<Float>
+    var paletteAccent: SIMD4<Float>
+    var paletteGlow: SIMD4<Float>
+    var ringStyle: SIMD4<Float>
+    var ringStyle2: SIMD4<Float>
+    var spectrumStyle0: SIMD4<Float>
+    var spectrumStyle1: SIMD4<Float>
+    var spectrumStyle2: SIMD4<Float>
+    var waveStyle0: SIMD4<Float>
+    var waveStyle1: SIMD4<Float>
 }
 
 private extension AudioScalars {
@@ -811,6 +997,16 @@ private extension AudioReactorPreferences {
             flags |= 1 << 2
         }
         return flags
+    }
+}
+
+private extension AudioReactorVisualizerLayout {
+    var overlayCode: Float {
+        switch self {
+        case .bottom: 0
+        case .circle: 1
+        case .arc: 2
+        }
     }
 }
 

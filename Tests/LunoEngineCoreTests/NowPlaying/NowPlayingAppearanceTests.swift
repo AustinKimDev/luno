@@ -26,6 +26,7 @@ final class NowPlayingAppearanceTests: XCTestCase {
         XCTAssertEqual(appearance.textColor, "#FFFFFF")
         XCTAssertEqual(appearance.accentColor, "#FF6B9C")
         XCTAssertEqual(appearance.glowTint, "#FFFFFF")
+        XCTAssertEqual(appearance.colorSource, .manual)
         XCTAssertEqual(appearance.scaleReaction, 1.0)
         XCTAssertEqual(appearance.glowReaction, 1.0)
         XCTAssertEqual(appearance.borderReaction, 1.0)
@@ -85,5 +86,27 @@ final class NowPlayingAppearanceTests: XCTestCase {
         XCTAssertEqual(neon?.accentColor, "#00F0FF")
         XCTAssertEqual(neon?.glowTint, "#00F0FF")
         XCTAssertEqual(neon?.titleWeight, .bold)
+    }
+
+    func testAlbumArtworkColorSourceResolvesFromAlbumPalette() {
+        let appearance = NowPlayingAppearance(
+            textColor: "#010203",
+            accentColor: "#040506",
+            glowTint: "#070809",
+            colorSource: .albumArtwork
+        )
+        let albumPalette = AlbumPalette(
+            background: SIMD4<Float>(0.02, 0.03, 0.04, 1),
+            primary: SIMD4<Float>(0.8, 0.1, 0.2, 1),
+            secondary: SIMD4<Float>(0.1, 0.45, 0.9, 1),
+            highlight: SIMD4<Float>(1, 0.76, 0.24, 1)
+        )
+
+        let resolved = appearance.resolved(with: albumPalette)
+
+        XCTAssertEqual(resolved.colorSource, .albumArtwork)
+        XCTAssertEqual(resolved.textColor, "#FFFFFF")
+        XCTAssertEqual(resolved.accentColor, "#FFC23D")
+        XCTAssertEqual(resolved.glowTint, "#FFE09E")
     }
 }

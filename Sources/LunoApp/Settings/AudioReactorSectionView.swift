@@ -26,6 +26,7 @@ final class AudioReactorSectionView: NSView {
     private let secondaryColorWell = NSColorWell()
     private let accentColorWell = NSColorWell()
     private let glowColorWell = NSColorWell()
+    private let paletteSourcePopup = NSPopUpButton()
 
     private let spectrumLayoutPopup = NSPopUpButton()
     private let spectrumBarCountSlider = LabeledValueSlider(minValue: 8, maxValue: 96)
@@ -89,6 +90,7 @@ final class AudioReactorSectionView: NSView {
         secondaryColorWell.color = NSColor(hexString: preferences.style.palette.secondaryColor) ?? .white
         accentColorWell.color = NSColor(hexString: preferences.style.palette.accentColor) ?? .white
         glowColorWell.color = NSColor(hexString: preferences.style.palette.glowColor) ?? .white
+        selectPaletteSource(preferences.style.palette.source)
 
         selectLayout(spectrumLayoutPopup, preferences.style.spectrum.layout)
         spectrumBarCountSlider.value = Double(preferences.style.spectrum.barCount)
@@ -176,6 +178,7 @@ final class AudioReactorSectionView: NSView {
         ]))
 
         stack.addArrangedSubview(group("Palette", rows: [
+            labeled("Color source", control: paletteSourcePopup),
             labeled("Primary", control: primaryColorWell),
             labeled("Secondary", control: secondaryColorWell),
             labeled("Accent", control: accentColorWell),
@@ -241,6 +244,7 @@ final class AudioReactorSectionView: NSView {
         configureColorWell(secondaryColorWell, selector: #selector(colorChanged))
         configureColorWell(accentColorWell, selector: #selector(colorChanged))
         configureColorWell(glowColorWell, selector: #selector(colorChanged))
+        configurePaletteSourcePopup()
 
         spectrumBarCountSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.barCount = Int(round(value)) } }
         spectrumBarWidthSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.barWidth = value } }
@@ -311,9 +315,25 @@ final class AudioReactorSectionView: NSView {
         popup.widthAnchor.constraint(equalToConstant: 180).isActive = true
     }
 
+    private func configurePaletteSourcePopup() {
+        paletteSourcePopup.removeAllItems()
+        for source in AudioReactorPaletteSource.allCases {
+            paletteSourcePopup.addItem(withTitle: source.displayName)
+            paletteSourcePopup.lastItem?.representedObject = source.rawValue
+        }
+        paletteSourcePopup.target = self
+        paletteSourcePopup.action = #selector(paletteSourceChanged)
+        paletteSourcePopup.widthAnchor.constraint(equalToConstant: 180).isActive = true
+    }
+
     private func selectLayout(_ popup: NSPopUpButton, _ layout: AudioReactorVisualizerLayout) {
         guard let index = AudioReactorVisualizerLayout.allCases.firstIndex(of: layout) else { return }
         popup.selectItem(at: index)
+    }
+
+    private func selectPaletteSource(_ source: AudioReactorPaletteSource) {
+        guard let index = AudioReactorPaletteSource.allCases.firstIndex(of: source) else { return }
+        paletteSourcePopup.selectItem(at: index)
     }
 
     private func rebuildPresetMenu() {
@@ -375,9 +395,15 @@ final class AudioReactorSectionView: NSView {
             secondaryColorWell,
             accentColorWell,
             glowColorWell,
+            paletteSourcePopup,
             spectrumLayoutPopup,
             waveLayoutPopup
         ].forEach { $0.isEnabled = active }
+
+        let usesManualColors = active && preferences.style.palette.source == .manual
+        [primaryColorWell, secondaryColorWell, accentColorWell, glowColorWell].forEach {
+            $0.isEnabled = usesManualColors
+        }
     }
 
     private func commitField(_ mutate: (inout AudioReactorPreferences) -> Void) {
@@ -436,12 +462,22 @@ final class AudioReactorSectionView: NSView {
         guard !isInternallyUpdating else { return }
         styleField {
             $0.palette = AudioReactorPalette(
+                source: .manual,
                 primaryColor: primaryColorWell.color.hexString,
                 secondaryColor: secondaryColorWell.color.hexString,
                 accentColor: accentColorWell.color.hexString,
                 glowColor: glowColorWell.color.hexString
             )
         }
+    }
+
+    @objc private func paletteSourceChanged(_ sender: NSPopUpButton) {
+        guard !isInternallyUpdating,
+              let rawValue = sender.selectedItem?.representedObject as? String,
+              let source = AudioReactorPaletteSource(rawValue: rawValue)
+        else { return }
+        styleField { $0.palette.source = source }
+        applyEnabledState()
     }
 
     @objc private func spectrumLayoutChanged(_ sender: NSPopUpButton) {
@@ -467,6 +503,15 @@ private extension AudioReactorVisualizerLayout {
         case .bottom: "Bottom"
         case .circle: "Circle"
         case .arc: "Arc"
+        }
+    }
+}
+
+private extension AudioReactorPaletteSource {
+    var displayName: String {
+        switch self {
+        case .manual: "Manual"
+        case .albumArtwork: "Album Artwork"
         }
     }
 }
@@ -503,7 +548,8 @@ private final class AudioReactorPreviewView: NSView {
         context.setFillColor(NSColor(calibratedWhite: 0.055, alpha: 1).cgColor)
         context.fill(bounds)
 
-        let style = preferences.style
+        var style = preferences.style
+        style.palette = style.palette.resolved(with: .fallback)
         if preferences.showsPulseRing {
             drawRing(in: rect, style: style, context: context)
         }

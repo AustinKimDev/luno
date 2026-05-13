@@ -43,18 +43,26 @@ public struct AudioReactorStylePreset: Equatable, Sendable {
     public let style: AudioReactorStyle
 }
 
+public enum AudioReactorPaletteSource: String, Codable, Equatable, Sendable, CaseIterable {
+    case manual
+    case albumArtwork
+}
+
 public struct AudioReactorPalette: Codable, Equatable, Sendable {
+    public var source: AudioReactorPaletteSource
     public var primaryColor: String
     public var secondaryColor: String
     public var accentColor: String
     public var glowColor: String
 
     public init(
+        source: AudioReactorPaletteSource = .manual,
         primaryColor: String,
         secondaryColor: String,
         accentColor: String,
         glowColor: String
     ) {
+        self.source = source
         self.primaryColor = Self.normalizedHex(primaryColor) ?? Self.default.primaryColor
         self.secondaryColor = Self.normalizedHex(secondaryColor) ?? Self.default.secondaryColor
         self.accentColor = Self.normalizedHex(accentColor) ?? Self.default.accentColor
@@ -69,11 +77,13 @@ public struct AudioReactorPalette: Codable, Equatable, Sendable {
     )
 
     private init(
+        source: AudioReactorPaletteSource = .manual,
         uncheckedPrimaryColor primaryColor: String,
         secondaryColor: String,
         accentColor: String,
         glowColor: String
     ) {
+        self.source = source
         self.primaryColor = primaryColor
         self.secondaryColor = secondaryColor
         self.accentColor = accentColor
@@ -83,6 +93,7 @@ public struct AudioReactorPalette: Codable, Equatable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
+            source: try container.decodeIfPresent(AudioReactorPaletteSource.self, forKey: .source) ?? .manual,
             primaryColor: try container.decodeIfPresent(String.self, forKey: .primaryColor) ?? Self.default.primaryColor,
             secondaryColor: try container.decodeIfPresent(String.self, forKey: .secondaryColor) ?? Self.default.secondaryColor,
             accentColor: try container.decodeIfPresent(String.self, forKey: .accentColor) ?? Self.default.accentColor,
@@ -90,10 +101,38 @@ public struct AudioReactorPalette: Codable, Equatable, Sendable {
         )
     }
 
+    public func resolved(with albumPalette: AlbumPalette) -> AudioReactorPalette {
+        guard source == .albumArtwork else { return self }
+        return AudioReactorPalette(
+            source: source,
+            primaryColor: Self.hexString(from: albumPalette.primary),
+            secondaryColor: Self.hexString(from: albumPalette.secondary),
+            accentColor: Self.hexString(from: albumPalette.highlight),
+            glowColor: Self.hexString(from: Self.mix(albumPalette.highlight, SIMD4<Float>(1, 1, 1, 1), amount: 0.5))
+        )
+    }
+
     private static func normalizedHex(_ hex: String) -> String? {
         let trimmed = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#").union(.whitespacesAndNewlines))
         guard trimmed.count == 6, Int(trimmed, radix: 16) != nil else { return nil }
         return "#\(trimmed.uppercased())"
+    }
+
+    private static func hexString(from color: SIMD4<Float>) -> String {
+        let red = UInt8(round(Self.clamped(color.x) * 255))
+        let green = UInt8(round(Self.clamped(color.y) * 255))
+        let blue = UInt8(round(Self.clamped(color.z) * 255))
+        return String(format: "#%02X%02X%02X", red, green, blue)
+    }
+
+    private static func clamped(_ value: Float) -> Float {
+        guard value.isFinite else { return 0 }
+        return min(max(value, 0), 1)
+    }
+
+    private static func mix(_ start: SIMD4<Float>, _ end: SIMD4<Float>, amount: Float) -> SIMD4<Float> {
+        let t = clamped(amount)
+        return start + (end - start) * t
     }
 }
 

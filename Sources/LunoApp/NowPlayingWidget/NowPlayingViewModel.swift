@@ -18,6 +18,7 @@ final class NowPlayingViewModel {
     var visible = false
     var isHovering = false
     var pulseAmplitude: Double = 0
+    var albumPalette: AlbumPalette = .fallback
     var preferences: NowPlayingPreferences
     var permissionState: PermissionState = .unknown
     var controlSender: ((NowPlayingControlCommand, NowPlayingSource) async throws -> Void)?

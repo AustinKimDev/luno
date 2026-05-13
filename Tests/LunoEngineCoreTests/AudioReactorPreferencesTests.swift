@@ -18,6 +18,7 @@ final class AudioReactorPreferencesTests: XCTestCase {
         XCTAssertEqual(preferences.style.spectrum.barCount, 48)
         XCTAssertEqual(preferences.style.ring.thickness, 0.018, accuracy: 0.001)
         XCTAssertEqual(preferences.style.wave.layout, .bottom)
+        XCTAssertEqual(preferences.style.palette.source, .manual)
     }
 
     func testCodableRoundTripPreservesFields() throws {
@@ -98,6 +99,7 @@ final class AudioReactorPreferencesTests: XCTestCase {
         XCTAssertEqual(style.palette.secondaryColor, "#FF00CC")
         XCTAssertEqual(style.palette.accentColor, "#123456")
         XCTAssertEqual(style.palette.glowColor, "#FFFFFF")
+        XCTAssertEqual(style.palette.source, .manual)
         XCTAssertEqual(style.spectrum.barCount, 96)
         XCTAssertEqual(style.spectrum.barWidth, 0)
         XCTAssertEqual(style.spectrum.barHeight, 1)
@@ -125,6 +127,30 @@ final class AudioReactorPreferencesTests: XCTestCase {
         XCTAssertEqual(presets.map(\.id), ["studio", "orbit", "club", "minimal", "ambient", "mono"])
         XCTAssertEqual(Set(presets.map(\.id)).count, presets.count)
         XCTAssertTrue(presets.allSatisfy { !$0.name.isEmpty })
+    }
+
+    func testAlbumArtworkPaletteSourceResolvesFromAlbumPalette() {
+        let palette = AudioReactorPalette(
+            source: .albumArtwork,
+            primaryColor: "#010203",
+            secondaryColor: "#040506",
+            accentColor: "#070809",
+            glowColor: "#0A0B0C"
+        )
+        let albumPalette = AlbumPalette(
+            background: SIMD4<Float>(0.02, 0.03, 0.04, 1),
+            primary: SIMD4<Float>(0.8, 0.1, 0.2, 1),
+            secondary: SIMD4<Float>(0.1, 0.45, 0.9, 1),
+            highlight: SIMD4<Float>(1, 0.76, 0.24, 1)
+        )
+
+        let resolved = palette.resolved(with: albumPalette)
+
+        XCTAssertEqual(resolved.source, .albumArtwork)
+        XCTAssertEqual(resolved.primaryColor, "#CC1A33")
+        XCTAssertEqual(resolved.secondaryColor, "#1A73E6")
+        XCTAssertEqual(resolved.accentColor, "#FFC23D")
+        XCTAssertEqual(resolved.glowColor, "#FFE09E")
     }
 
     func testDisabledPreferencesSilenceFeatures() {

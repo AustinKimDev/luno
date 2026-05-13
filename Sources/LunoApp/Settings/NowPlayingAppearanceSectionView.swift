@@ -18,6 +18,7 @@ final class NowPlayingAppearanceSectionView: NSView {
     private let borderOpacitySlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
     private let titleWeightPopup = NSPopUpButton()
     private let subtitleWeightPopup = NSPopUpButton()
+    private let colorSourcePopup = NSPopUpButton()
     private let textColorWell = NSColorWell()
     private let accentColorWell = NSColorWell()
     private let glowColorWell = NSColorWell()
@@ -46,9 +47,11 @@ final class NowPlayingAppearanceSectionView: NSView {
         borderOpacitySlider.value = appearance.borderOpacity
         selectWeight(titleWeightPopup, appearance.titleWeight)
         selectWeight(subtitleWeightPopup, appearance.subtitleWeight)
+        selectColorSource(appearance.colorSource)
         textColorWell.color = NSColor(hexString: appearance.textColor) ?? .white
         accentColorWell.color = NSColor(hexString: appearance.accentColor) ?? .white
         glowColorWell.color = NSColor(hexString: appearance.glowTint) ?? .white
+        applyColorWellState()
     }
 
     private func buildLayout() {
@@ -89,6 +92,8 @@ final class NowPlayingAppearanceSectionView: NSView {
         stack.addArrangedSubview(labeled("Title weight", control: titleWeightPopup))
         stack.addArrangedSubview(labeled("Subtitle weight", control: subtitleWeightPopup))
 
+        configureColorSourcePopup()
+        stack.addArrangedSubview(labeled("Color source", control: colorSourcePopup))
         configureColorWell(textColorWell, selector: #selector(textColorChanged))
         configureColorWell(accentColorWell, selector: #selector(accentColorChanged))
         configureColorWell(glowColorWell, selector: #selector(glowColorChanged))
@@ -126,9 +131,30 @@ final class NowPlayingAppearanceSectionView: NSView {
         well.heightAnchor.constraint(equalToConstant: 24).isActive = true
     }
 
+    private func configureColorSourcePopup() {
+        colorSourcePopup.removeAllItems()
+        for source in NowPlayingColorSource.allCases {
+            colorSourcePopup.addItem(withTitle: source.displayName)
+            colorSourcePopup.lastItem?.representedObject = source.rawValue
+        }
+        colorSourcePopup.target = self
+        colorSourcePopup.action = #selector(colorSourceChanged)
+        colorSourcePopup.widthAnchor.constraint(equalToConstant: 160).isActive = true
+    }
+
     private func selectWeight(_ popup: NSPopUpButton, _ weight: NowPlayingAppearance.FontWeight) {
         guard let index = NowPlayingAppearance.FontWeight.allCases.firstIndex(of: weight) else { return }
         popup.selectItem(at: index)
+    }
+
+    private func selectColorSource(_ source: NowPlayingColorSource) {
+        guard let index = NowPlayingColorSource.allCases.firstIndex(of: source) else { return }
+        colorSourcePopup.selectItem(at: index)
+    }
+
+    private func applyColorWellState() {
+        let enabled = widgetAppearance.colorSource == .manual
+        [textColorWell, accentColorWell, glowColorWell].forEach { $0.isEnabled = enabled }
     }
 
     private func rebuildPresetMenu(selecting appearance: NowPlayingAppearance) {
@@ -163,6 +189,7 @@ final class NowPlayingAppearanceSectionView: NSView {
             widgetAppearance.textColor = textColorWell.color.hexString
             widgetAppearance.accentColor = accentColorWell.color.hexString
             widgetAppearance.glowTint = glowColorWell.color.hexString
+            widgetAppearance.colorSource = .manual
         }
         // Re-clamp through the initializer so out-of-range slider values are normalized.
         let clamped = NowPlayingAppearance(
@@ -175,12 +202,14 @@ final class NowPlayingAppearanceSectionView: NSView {
             textColor: widgetAppearance.textColor,
             accentColor: widgetAppearance.accentColor,
             glowTint: widgetAppearance.glowTint,
+            colorSource: widgetAppearance.colorSource,
             scaleReaction: widgetAppearance.scaleReaction,
             glowReaction: widgetAppearance.glowReaction,
             borderReaction: widgetAppearance.borderReaction
         )
         widgetAppearance = clamped
         rebuildPresetMenu(selecting: widgetAppearance)
+        applyColorWellState()
         delegate?.nowPlayingAppearanceSection(self, didChange: widgetAppearance)
     }
 
@@ -222,6 +251,15 @@ final class NowPlayingAppearanceSectionView: NSView {
         guard !isInternallyUpdating else { return }
         commit(reconciledFromColorWells: true)
     }
+
+    @objc private func colorSourceChanged(_ sender: NSPopUpButton) {
+        guard !isInternallyUpdating,
+              let rawValue = sender.selectedItem?.representedObject as? String,
+              let source = NowPlayingColorSource(rawValue: rawValue)
+        else { return }
+        widgetAppearance.colorSource = source
+        commit(reconciledFromColorWells: false)
+    }
 }
 
 private extension NowPlayingAppearance.FontWeight {
@@ -233,6 +271,15 @@ private extension NowPlayingAppearance.FontWeight {
         case .bold: "Bold"
         case .heavy: "Heavy"
         case .black: "Black"
+        }
+    }
+}
+
+private extension NowPlayingColorSource {
+    var displayName: String {
+        switch self {
+        case .manual: "Manual"
+        case .albumArtwork: "Album Artwork"
         }
     }
 }

@@ -294,13 +294,14 @@ private struct RootContainer: View {
 
     var body: some View {
         let widgetSize = viewModel.preferences.style.widgetSize
+        let appearance = viewModel.preferences.appearance.resolved(with: viewModel.albumPalette)
         return Group {
             if let track = viewModel.track {
                 NowPlayingWidgetView(
                     style: viewModel.preferences.style,
                     track: track,
                     pulseAmplitude: viewModel.pulseAmplitude,
-                    appearance: viewModel.preferences.appearance,
+                    appearance: appearance,
                     isHovering: viewModel.isHovering,
                     canControl: track.source != .mediaRemote && !track.isAdvertisement,
                     onCommand: { intent in viewModel.send(intent) }
