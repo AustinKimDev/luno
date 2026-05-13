@@ -23,6 +23,18 @@ actor MockAppleScriptRunner: AppleScriptRunner {
     }
 }
 
+actor MockAppleMusicArtworkURLResolver: AppleMusicArtworkURLResolving {
+    private let url: URL?
+
+    init(url: URL?) {
+        self.url = url
+    }
+
+    func artworkURL(title: String, artist: String?, album: String?) async -> URL? {
+        url
+    }
+}
+
 final class AppleMusicProviderTests: XCTestCase {
     func testEmitsTrackWhenRunnerReportsPlaying() async throws {
         let runner = MockAppleScriptRunner()
@@ -101,5 +113,37 @@ final class AppleMusicProviderTests: XCTestCase {
         await provider.stop()
 
         XCTAssertEqual(track??.title, "Aja")
+    }
+
+    func testUsesArtworkURLResolverWhenRunnerHasNoArtwork() async throws {
+        let runner = MockAppleScriptRunner()
+        let artworkURL = try XCTUnwrap(URL(string: "https://example.com/artwork.jpg"))
+        let resolver = MockAppleMusicArtworkURLResolver(url: artworkURL)
+        let info = RawTrackInfo(
+            title: "Susususu Suki Daaisuki",
+            artist: "Yamane Mah",
+            album: "すすすす、すき、だあいすき - 今週のシングル",
+            composer: nil,
+            artworkData: nil,
+            artworkURL: nil,
+            trackID: "3",
+            isPlaying: true
+        )
+        await runner.enqueue(.success(info))
+
+        let clock = FakeNowPlayingClock(start: Date(timeIntervalSince1970: 1_000))
+        let provider = AppleMusicProvider(
+            runner: runner,
+            clock: clock,
+            pollInterval: 0.01,
+            artworkURLResolver: resolver
+        )
+
+        var iterator = provider.tracks.makeAsyncIterator()
+        await provider.start()
+        let track = await iterator.next()
+        await provider.stop()
+
+        XCTAssertEqual(track??.artwork, .url(artworkURL))
     }
 }

@@ -7,6 +7,7 @@ public actor AppleMusicProvider: NowPlayingProvider, NowPlayingControls {
     private let runner: AppleScriptRunner
     private let clock: NowPlayingClock
     private let pollInterval: TimeInterval
+    private let artworkURLResolver: AppleMusicArtworkURLResolving
     private let continuation: AsyncStream<NowPlayingTrack?>.Continuation
 
     private var pollTask: Task<Void, Never>?
@@ -16,11 +17,13 @@ public actor AppleMusicProvider: NowPlayingProvider, NowPlayingControls {
     public init(
         runner: AppleScriptRunner,
         clock: NowPlayingClock = SystemNowPlayingClock(),
-        pollInterval: TimeInterval = 1.0
+        pollInterval: TimeInterval = 1.0,
+        artworkURLResolver: AppleMusicArtworkURLResolving = NoopAppleMusicArtworkURLResolver()
     ) {
         self.runner = runner
         self.clock = clock
         self.pollInterval = pollInterval
+        self.artworkURLResolver = artworkURLResolver
         let (stream, continuation) = AsyncStream<NowPlayingTrack?>.makeStream()
         self.tracks = stream
         self.continuation = continuation
@@ -56,12 +59,17 @@ public actor AppleMusicProvider: NowPlayingProvider, NowPlayingControls {
         try await runner.sendControl(command)
     }
 
-    private func handle(result: Result<RawTrackInfo?, Error>, now: Date) {
+    private func handle(result: Result<RawTrackInfo?, Error>, now: Date) async {
         switch result {
         case .failure:
             return
         case .success(let raw):
-            let track = raw.map { mapToTrack($0, now: now) }
+            let track: NowPlayingTrack?
+            if let raw {
+                track = await mapToTrack(raw, now: now)
+            } else {
+                track = nil
+            }
             if !hasEmitted || track != lastEmitted {
                 hasEmitted = true
                 lastEmitted = track
@@ -70,11 +78,13 @@ public actor AppleMusicProvider: NowPlayingProvider, NowPlayingControls {
         }
     }
 
-    private func mapToTrack(_ raw: RawTrackInfo, now: Date) -> NowPlayingTrack {
+    private func mapToTrack(_ raw: RawTrackInfo, now: Date) async -> NowPlayingTrack {
         let artwork: NowPlayingTrack.Artwork?
         if let data = raw.artworkData {
             artwork = .data(data)
         } else if let url = raw.artworkURL {
+            artwork = .url(url)
+        } else if let url = await artworkURLResolver.artworkURL(title: raw.title, artist: raw.artist, album: raw.album) {
             artwork = .url(url)
         } else {
             artwork = nil

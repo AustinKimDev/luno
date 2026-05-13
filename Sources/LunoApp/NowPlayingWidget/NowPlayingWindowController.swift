@@ -109,7 +109,7 @@ private struct RootContainer: View {
 
     var body: some View {
         Group {
-            if viewModel.visible, let track = viewModel.track {
+            if let track = viewModel.track {
                 NowPlayingWidgetView(
                     style: viewModel.preferences.style,
                     track: track,
@@ -139,8 +139,60 @@ private struct RootContainer: View {
                 )
                 .opacity(viewModel.visible ? 1 : 0)
             } else {
-                Color.clear
+                WaitingForMusicView()
+                    .gesture(dragGesture)
             }
         }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(coordinateSpace: .global)
+            .onChanged { value in
+                guard let window = windowController?.window else { return }
+                let origin = dragOrigin ?? window.frame.origin
+                dragOrigin = origin
+                window.setFrameOrigin(NSPoint(
+                    x: origin.x + value.translation.width,
+                    y: origin.y - value.translation.height
+                ))
+            }
+            .onEnded { _ in
+                dragOrigin = nil
+                windowController?.saveCurrentPosition()
+            }
+    }
+}
+
+private struct WaitingForMusicView: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "music.note")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Color.white.opacity(0.12)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Waiting for music")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text("Apple Music or Spotify")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.68))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(GlassBackground())
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: 8)
     }
 }

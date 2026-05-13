@@ -376,7 +376,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
         guard nowPlayingCoordinator == nil else { return }
         guard let nowPlayingPreferencesStore else { return }
 
-        let appleMusicProvider = AppleMusicProvider(runner: appleMusicRunner)
+        let appleMusicProvider = AppleMusicProvider(
+            runner: appleMusicRunner,
+            artworkURLResolver: ITunesSearchArtworkURLResolver()
+        )
         let spotifyProvider = SpotifyProvider(runner: spotifyRunner)
         let mediaRemoteProvider = MediaRemoteProvider()
         self.appleMusicProvider = appleMusicProvider

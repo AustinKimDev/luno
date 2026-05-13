@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 APP_DIR="$ROOT_DIR/.build/artifacts/Luno.app"
+ENTITLEMENTS_FILE="$ROOT_DIR/scripts/Luno.entitlements"
 rm -rf "$APP_DIR"
 find "$ROOT_DIR/.build" -path '*/release/Luno.app' -prune -exec rm -rf {} + 2>/dev/null || true
 
@@ -75,7 +76,7 @@ if [[ -z "${LUNO_CODESIGN_IDENTITY:-}" ]]; then
   LUNO_CODESIGN_IDENTITY="-"
 fi
 
-codesign --force --options runtime --sign "$LUNO_CODESIGN_IDENTITY" "$APP_DIR"
+codesign --force --options runtime --entitlements "$ENTITLEMENTS_FILE" --sign "$LUNO_CODESIGN_IDENTITY" "$APP_DIR"
 codesign --verify --strict --deep --verbose=2 "$APP_DIR"
 
 echo "Built and signed $APP_DIR with identity: $LUNO_CODESIGN_IDENTITY"

@@ -1,7 +1,6 @@
 import Foundation
 
 public final class MusicAppScriptRunner: AppleScriptRunner, @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.luno.applescript.music")
     private let fetchScript: NSAppleScript?
 
     public init() {
@@ -36,7 +35,7 @@ public final class MusicAppScriptRunner: AppleScriptRunner, @unchecked Sendable 
                     try
                         set artList to artworks of trk
                         if (count of artList) > 0 then
-                            set artData to (data of item 1 of artList as string)
+                            set artData to (raw data of item 1 of artList)
                         end if
                     on error
                         set artData to ""
@@ -53,24 +52,16 @@ public final class MusicAppScriptRunner: AppleScriptRunner, @unchecked Sendable 
     }
 
     public func fetchTrack() async throws -> RawTrackInfo? {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async { [weak self] in
-                guard let self else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                guard let script = self.fetchScript else {
-                    continuation.resume(throwing: AppleScriptRunnerError.scriptError("script not compiled"))
-                    return
-                }
-                var error: NSDictionary?
-                let descriptor = script.executeAndReturnError(&error)
-                if let error {
-                    continuation.resume(throwing: Self.mapError(error))
-                    return
-                }
-                continuation.resume(returning: Self.parse(descriptor))
+        try await MainActor.run {
+            guard let script = fetchScript else {
+                throw AppleScriptRunnerError.scriptError("script not compiled")
             }
+            var error: NSDictionary?
+            let descriptor = script.executeAndReturnError(&error)
+            if let error {
+                throw Self.mapError(error)
+            }
+            return Self.parse(descriptor)
         }
     }
 
@@ -96,19 +87,14 @@ public final class MusicAppScriptRunner: AppleScriptRunner, @unchecked Sendable 
         """
         let invalidScriptMessage = "invalid script for \(command)"
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            queue.async {
-                guard let script = NSAppleScript(source: source) else {
-                    continuation.resume(throwing: AppleScriptRunnerError.scriptError(invalidScriptMessage))
-                    return
-                }
-                var error: NSDictionary?
-                _ = script.executeAndReturnError(&error)
-                if let error {
-                    continuation.resume(throwing: Self.mapError(error))
-                } else {
-                    continuation.resume()
-                }
+        try await MainActor.run {
+            guard let script = NSAppleScript(source: source) else {
+                throw AppleScriptRunnerError.scriptError(invalidScriptMessage)
+            }
+            var error: NSDictionary?
+            _ = script.executeAndReturnError(&error)
+            if let error {
+                throw Self.mapError(error)
             }
         }
     }
@@ -125,10 +111,9 @@ public final class MusicAppScriptRunner: AppleScriptRunner, @unchecked Sendable 
 
         var artData: Data?
         if descriptor.numberOfItems >= 7,
-           let artString = descriptor.atIndex(7)?.stringValue,
-           !artString.isEmpty,
-           let decoded = Data(base64Encoded: artString) {
-            artData = decoded
+           let data = descriptor.atIndex(7)?.data,
+           !data.isEmpty {
+            artData = data
         }
 
         return RawTrackInfo(

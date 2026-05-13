@@ -4,30 +4,22 @@ import Foundation
 public final class SpotifyAppScriptRunner: AppleScriptRunner, @unchecked Sendable {
     private static let bundleIdentifier = "com.spotify.client"
 
-    private let queue = DispatchQueue(label: "com.luno.applescript.spotify")
-
     public init() {}
 
     public func fetchTrack() async throws -> RawTrackInfo? {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async {
-                guard Self.isSpotifyRunning() else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-
-                guard let script = NSAppleScript(source: Self.fetchSource) else {
-                    continuation.resume(throwing: AppleScriptRunnerError.scriptError("script not compiled"))
-                    return
-                }
-                var error: NSDictionary?
-                let descriptor = script.executeAndReturnError(&error)
-                if let error {
-                    continuation.resume(throwing: Self.mapError(error))
-                    return
-                }
-                continuation.resume(returning: Self.parse(descriptor))
+        try await MainActor.run {
+            guard Self.isSpotifyRunning() else {
+                return nil
             }
+            guard let script = NSAppleScript(source: Self.fetchSource) else {
+                throw AppleScriptRunnerError.scriptError("script not compiled")
+            }
+            var error: NSDictionary?
+            let descriptor = script.executeAndReturnError(&error)
+            if let error {
+                throw Self.mapError(error)
+            }
+            return Self.parse(descriptor)
         }
     }
 
@@ -49,24 +41,17 @@ public final class SpotifyAppScriptRunner: AppleScriptRunner, @unchecked Sendabl
         let source = "tell application id \"\(Self.bundleIdentifier)\" to \(action)"
         let invalidScriptMessage = "invalid script for \(command)"
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            queue.async {
-                guard Self.isSpotifyRunning() else {
-                    continuation.resume()
-                    return
-                }
-
-                guard let script = NSAppleScript(source: source) else {
-                    continuation.resume(throwing: AppleScriptRunnerError.scriptError(invalidScriptMessage))
-                    return
-                }
-                var error: NSDictionary?
-                _ = script.executeAndReturnError(&error)
-                if let error {
-                    continuation.resume(throwing: Self.mapError(error))
-                } else {
-                    continuation.resume()
-                }
+        try await MainActor.run {
+            guard Self.isSpotifyRunning() else {
+                return
+            }
+            guard let script = NSAppleScript(source: source) else {
+                throw AppleScriptRunnerError.scriptError(invalidScriptMessage)
+            }
+            var error: NSDictionary?
+            _ = script.executeAndReturnError(&error)
+            if let error {
+                throw Self.mapError(error)
             }
         }
     }
