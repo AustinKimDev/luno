@@ -23,16 +23,15 @@ public actor NowPlayingCoordinator {
         self.clock = clock
         self.priorityOrder = priorityOrder
         self.priorityHoldSeconds = priorityHoldSeconds
-        var captured: AsyncStream<NowPlayingTrack?>.Continuation!
-        self.tracks = AsyncStream { captured = $0 }
-        self.outputContinuation = captured
+        let (stream, continuation) = AsyncStream<NowPlayingTrack?>.makeStream()
+        self.tracks = stream
+        self.outputContinuation = continuation
     }
 
     public func start() async {
         for provider in providers { await provider.start() }
 
-        pumpTask = Task { [weak self] in
-            guard let self else { return }
+        pumpTask = Task {
             await self.pumpAll()
         }
     }
@@ -49,9 +48,9 @@ public actor NowPlayingCoordinator {
             for provider in providers {
                 let source = provider.source
                 let stream = provider.tracks
-                group.addTask { [weak self] in
+                group.addTask {
                     for await track in stream {
-                        await self?.handle(source: source, track: track)
+                        await self.handle(source: source, track: track)
                     }
                 }
             }

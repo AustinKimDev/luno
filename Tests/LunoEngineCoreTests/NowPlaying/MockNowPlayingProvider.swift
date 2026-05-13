@@ -17,7 +17,10 @@ final class MockNowPlayingProvider: NowPlayingProvider, @unchecked Sendable {
     }
 
     func start() async { startCount += 1 }
-    func stop() async { stopCount += 1 }
+    func stop() async {
+        stopCount += 1
+        continuation.finish()
+    }
 
     func emit(_ track: NowPlayingTrack?) {
         continuation.yield(track)
