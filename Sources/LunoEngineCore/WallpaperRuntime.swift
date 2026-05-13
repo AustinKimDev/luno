@@ -447,27 +447,7 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         _ spectrum: [Float],
         preferences: AudioReactorPreferences
     ) {
-        guard !spectrum.isEmpty else {
-            overlaySpectrum.withUnsafeMutableBufferPointer { buffer in
-                for index in buffer.indices {
-                    buffer[index] = 0
-                }
-            }
-            return
-        }
-
-        overlaySpectrum.withUnsafeMutableBufferPointer { buffer in
-            for index in buffer.indices {
-                let start = index * spectrum.count / buffer.count
-                let end = max(start + 1, (index + 1) * spectrum.count / buffer.count)
-                var total: Float = 0
-                let clampedEnd = min(end, spectrum.count)
-                for spectrumIndex in start..<clampedEnd {
-                    total += preferences.shaped(spectrum[spectrumIndex])
-                }
-                buffer[index] = total / Float(clampedEnd - start)
-            }
-        }
+        preferences.writeDownsampledSpectrum(spectrum, into: &overlaySpectrum)
     }
 
     private static func makeOverlayPipelineState(

@@ -84,15 +84,27 @@ final class AudioReactorPreferencesTests: XCTestCase {
     }
 
     func testDownsamplesSpectrumByAveragingBuckets() {
+        let preferences = AudioReactorPreferences.defaults.with(intensity: 1, response: .punchy)
         let spectrum: [Float] = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 0.5, 0.25]
 
-        let bars = AudioReactorPreferences.downsampleSpectrum(spectrum, count: 4)
+        let bars = preferences.downsampleSpectrum(spectrum, count: 4)
 
         XCTAssertEqual(bars.count, 4)
-        XCTAssertEqual(bars[0], 0.1, accuracy: 0.001)
-        XCTAssertEqual(bars[1], 0.5, accuracy: 0.001)
-        XCTAssertEqual(bars[2], 0.9, accuracy: 0.001)
-        XCTAssertEqual(bars[3], 0.375, accuracy: 0.001)
+        XCTAssertEqual(bars[0], (preferences.shaped(0.0) + preferences.shaped(0.2)) / 2, accuracy: 0.001)
+        XCTAssertEqual(bars[1], (preferences.shaped(0.4) + preferences.shaped(0.6)) / 2, accuracy: 0.001)
+        XCTAssertEqual(bars[2], (preferences.shaped(0.8) + preferences.shaped(1.0)) / 2, accuracy: 0.001)
+        XCTAssertEqual(bars[3], (preferences.shaped(0.5) + preferences.shaped(0.25)) / 2, accuracy: 0.001)
+    }
+
+    func testWritesDownsampledSpectrumIntoExistingBuffer() {
+        let preferences = AudioReactorPreferences.defaults.with(intensity: 1, response: .punchy)
+        let spectrum: [Float] = [0.0, 0.5, 1.0, 0.25]
+        var bars: [Float] = [9, 9]
+
+        preferences.writeDownsampledSpectrum(spectrum, into: &bars)
+
+        XCTAssertEqual(bars[0], (preferences.shaped(0.0) + preferences.shaped(0.5)) / 2, accuracy: 0.001)
+        XCTAssertEqual(bars[1], (preferences.shaped(1.0) + preferences.shaped(0.25)) / 2, accuracy: 0.001)
     }
 
     func testStoreReturnsDefaultsWhenMissingAndRoundTrips() throws {

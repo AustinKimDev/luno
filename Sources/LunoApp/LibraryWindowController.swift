@@ -291,7 +291,7 @@ final class LibraryWindowController: NSWindowController {
             let unavailable = NSTextField(labelWithString: "Unavailable for this wallpaper.")
             unavailable.textColor = .secondaryLabelColor
             unavailable.isEnabled = false
-            parameterStack.addArrangedSubview(labeled("Audio Reactor", control: unavailable))
+            parameterStack.addArrangedSubview(unavailable)
             syncAudioReactorControls()
             return
         }

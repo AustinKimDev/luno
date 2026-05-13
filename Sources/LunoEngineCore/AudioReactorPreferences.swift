@@ -82,16 +82,39 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
         return Self.clamp(shaped)
     }
 
-    public static func downsampleSpectrum(_ spectrum: [Float], count: Int) -> [Float] {
+    func downsampleSpectrum(_ spectrum: [Float], count: Int) -> [Float] {
         guard count > 0 else { return [] }
-        guard !spectrum.isEmpty else { return Array(repeating: 0, count: count) }
+        var output = Array(repeating: Float(0), count: count)
+        writeDownsampledSpectrum(spectrum, into: &output)
+        return output
+    }
 
-        return (0..<count).map { index in
-            let start = index * spectrum.count / count
-            let end = max(start + 1, (index + 1) * spectrum.count / count)
-            let bucket = spectrum[start..<min(end, spectrum.count)]
-            let total = bucket.reduce(Float(0)) { $0 + clamp($1) }
-            return total / Float(bucket.count)
+    func writeDownsampledSpectrum(_ spectrum: [Float], into output: inout [Float]) {
+        Self.writeDownsampledSpectrum(spectrum, into: &output, transform: shaped)
+    }
+
+    private static func writeDownsampledSpectrum(
+        _ spectrum: [Float],
+        into output: inout [Float],
+        transform: (Float) -> Float
+    ) {
+        guard !output.isEmpty else { return }
+        guard !spectrum.isEmpty else {
+            for index in output.indices {
+                output[index] = 0
+            }
+            return
+        }
+
+        for index in output.indices {
+            let start = index * spectrum.count / output.count
+            let end = max(start + 1, (index + 1) * spectrum.count / output.count)
+            let clampedEnd = min(end, spectrum.count)
+            var total: Float = 0
+            for spectrumIndex in start..<clampedEnd {
+                total += transform(spectrum[spectrumIndex])
+            }
+            output[index] = total / Float(clampedEnd - start)
         }
     }
 

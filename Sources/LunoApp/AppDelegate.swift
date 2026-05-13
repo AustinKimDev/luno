@@ -190,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
                 self?.audioFeatures ?? .silent
             },
             audioReactorPreferencesProvider: { [weak self] in
-                guard let self else { return .defaults }
+                guard let self else { return Self.disabledAudioReactorPreferences }
                 guard !package.manifest.audioBindings.isEmpty else {
                     return Self.disabledAudioReactorPreferences
                 }
@@ -462,11 +462,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, LibraryWindowControlle
     }
 
     private func updateAudioReactor(preferences: AudioReactorPreferences, shouldPersist: Bool) {
+        let wasEnabled = audioReactorPreferences.isEnabled
         audioReactorPreferences = preferences
-        guard shouldPersist else { return }
 
-        try? audioReactorPreferencesStore?.save(preferences)
-        reconcileAudioCaptureState()
+        if shouldPersist {
+            try? audioReactorPreferencesStore?.save(preferences)
+        }
+        if wasEnabled != preferences.isEnabled {
+            reconcileAudioCaptureState()
+        }
     }
 
     private static let disabledAudioReactorPreferences = AudioReactorPreferences(
