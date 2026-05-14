@@ -183,4 +183,43 @@ final class AudioReactorColorMathTests: XCTestCase {
         let albumPrimaryHue = AudioReactorColorMath.rgbToHSL(r: albumPrimary.r, g: albumPrimary.g, b: albumPrimary.b).h
         XCTAssertEqual(primaryHue, albumPrimaryHue, accuracy: 1.0)
     }
+
+    func testBeatGateFiresWhenBassSpikesAboveEMA() {
+        var gate = AudioReactorColorMath.BeatGate()
+
+        // 30 frames of low bass to settle EMA near 0.10.
+        for _ in 0..<30 {
+            _ = gate.step(bass: 0.10, deltaTime: 1.0 / 60)
+        }
+
+        // Sudden spike: 0.10 -> 0.6 should clearly exceed EMA * 1.45 and > 0.25.
+        let level = gate.step(bass: 0.6, deltaTime: 1.0 / 60)
+        XCTAssertGreaterThan(level, 0.9, "beat should fire and produce ~1 gateLevel")
+    }
+
+    func testBeatGateDecaysOverFrames() {
+        var gate = AudioReactorColorMath.BeatGate()
+        for _ in 0..<30 {
+            _ = gate.step(bass: 0.10, deltaTime: 1.0 / 60)
+        }
+        _ = gate.step(bass: 0.6, deltaTime: 1.0 / 60)
+
+        // Five more frames at low bass: gateLevel should decay (0.92^5 ≈ 0.66).
+        var level: Float = 1
+        for _ in 0..<5 {
+            level = gate.step(bass: 0.10, deltaTime: 1.0 / 60)
+        }
+        XCTAssertLessThan(level, 0.70, "expected decay below 0.70 after 5 frames")
+        XCTAssertGreaterThan(level, 0.55)
+    }
+
+    func testBeatGateDoesNotFireBelowAbsoluteFloor() {
+        var gate = AudioReactorColorMath.BeatGate()
+        // Bass spike of 0.20 (>1.45 * EMA but < 0.25 absolute floor) must not fire.
+        for _ in 0..<30 {
+            _ = gate.step(bass: 0.05, deltaTime: 1.0 / 60)
+        }
+        let level = gate.step(bass: 0.20, deltaTime: 1.0 / 60)
+        XCTAssertLessThan(level, 0.10, "bass below 0.25 floor must not fire")
+    }
 }

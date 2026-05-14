@@ -143,6 +143,30 @@ public enum AudioReactorColorMath {
         return min(raw, 360 - raw)
     }
 
+    public struct BeatGate: Equatable, Sendable {
+        public var emaBass: Float
+        public var gateLevel: Float
+
+        public init() {
+            emaBass = 0
+            gateLevel = 0
+        }
+
+        public mutating func step(bass: Float, deltaTime: Float) -> Float {
+            let tau: Float = 0.6
+            let alpha = max(0, min(1, deltaTime / max(tau, 0.0001)))
+            emaBass = emaBass + (bass - emaBass) * alpha
+
+            let fires = bass > emaBass * 1.45 && bass > 0.25
+            if fires {
+                gateLevel = 1
+            } else {
+                gateLevel *= 0.92
+            }
+            return gateLevel
+        }
+    }
+
     public static func applyVivid(
         role: ChannelRole,
         albumPrimary: RGB,
