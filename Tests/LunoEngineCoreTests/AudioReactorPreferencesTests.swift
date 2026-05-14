@@ -454,6 +454,24 @@ final class AudioReactorPreferencesTests: XCTestCase {
         XCTAssertEqual(decoded.colorCycle, 0, accuracy: 0.001)
         XCTAssertEqual(decoded.motionTrail, 0, accuracy: 0.001)
     }
+
+    func testBeatGateDefaultsFalseAndRoundTrips() throws {
+        XCTAssertFalse(AudioReactorPreferences.defaults.beatGate)
+
+        var prefs = AudioReactorPreferences.defaults
+        prefs.beatGate = true
+        let data = try JSONEncoder().encode(prefs)
+        let decoded = try JSONDecoder().decode(AudioReactorPreferences.self, from: data)
+        XCTAssertTrue(decoded.beatGate)
+    }
+
+    func testBeatGateDecodesDefaultWhenAbsent() throws {
+        let json = """
+        {"isEnabled":true,"intensity":0.8,"response":"punchy","bassPulseStrength":0.75,"showsPulseRing":true,"showsSpectrumBars":true,"showsWaveLine":false,"overlayOpacity":0.6}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(AudioReactorPreferences.self, from: json)
+        XCTAssertFalse(decoded.beatGate)
+    }
 }
 
 private extension AudioReactorPreferences {

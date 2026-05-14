@@ -542,6 +542,7 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
     public var showsSpectrumBars: Bool
     public var showsWaveLine: Bool
     public var overlayOpacity: Double
+    public var beatGate: Bool
     public var style: AudioReactorStyle
 
     public init(
@@ -553,6 +554,7 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
         showsSpectrumBars: Bool,
         showsWaveLine: Bool,
         overlayOpacity: Double,
+        beatGate: Bool = false,
         style: AudioReactorStyle = .default
     ) {
         self.isEnabled = isEnabled
@@ -563,6 +565,7 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
         self.showsSpectrumBars = showsSpectrumBars
         self.showsWaveLine = showsWaveLine
         self.overlayOpacity = overlayOpacity
+        self.beatGate = beatGate
         self.style = style
     }
 
@@ -577,6 +580,7 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
             showsSpectrumBars: try container.decode(Bool.self, forKey: .showsSpectrumBars),
             showsWaveLine: try container.decode(Bool.self, forKey: .showsWaveLine),
             overlayOpacity: try container.decode(Double.self, forKey: .overlayOpacity),
+            beatGate: try container.decodeIfPresent(Bool.self, forKey: .beatGate) ?? false,
             style: try container.decodeIfPresent(AudioReactorStyle.self, forKey: .style) ?? .default
         )
     }
