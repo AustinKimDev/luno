@@ -173,9 +173,28 @@ final class AudioReactorPreferencesTests: XCTestCase {
 
     func testBuiltInAudioReactorPresetsHaveUniqueStableIDs() {
         let presets = AudioReactorStyle.presets
-        XCTAssertEqual(presets.map(\.id), ["studio", "orbit", "club", "minimal", "ambient", "mono"])
+        XCTAssertEqual(presets.map(\.id), ["studio", "orbit", "club", "minimal", "ambient", "mono", "halo", "cascade", "ribbon", "pulse", "spectro", "crystal", "nebula", "vapor"])
         XCTAssertEqual(Set(presets.map(\.id)).count, presets.count)
         XCTAssertTrue(presets.allSatisfy { !$0.name.isEmpty })
+    }
+
+    func testAllPresetsAreWellFormed() {
+        for id in AudioReactorStylePresetID.allCases {
+            let style = AudioReactorStyle.preset(id)
+            XCTAssertEqual(style.presetID, id.rawValue, "presetID mismatch for \(id)")
+            XCTAssertGreaterThan(style.spectrum.barCount, 0, "\(id) has zero bar count")
+            XCTAssertTrue(style.palette.primaryColor.hasPrefix("#"), "\(id) primary color is not hex")
+            XCTAssertEqual(style.palette.primaryColor.count, 7, "\(id) primary color hex length wrong")
+        }
+    }
+
+    func testCascadePresetEnablesMirror() {
+        let style = AudioReactorStyle.preset(.cascade)
+        XCTAssertTrue(style.spectrum.mirrored, "cascade preset should enable mirrored spectrum")
+    }
+
+    func testNewPresetCount() {
+        XCTAssertEqual(AudioReactorStylePresetID.allCases.count, 14, "expected 6 original + 8 new = 14 presets")
     }
 
     func testAlbumArtworkPaletteSourceResolvesFromAlbumPalette() {

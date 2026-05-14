@@ -35,6 +35,14 @@ public enum AudioReactorStylePresetID: String, Codable, Equatable, Sendable, Cas
     case minimal
     case ambient
     case mono
+    case halo
+    case cascade
+    case ribbon
+    case pulse
+    case spectro
+    case crystal
+    case nebula
+    case vapor
 }
 
 public struct AudioReactorStylePreset: Equatable, Sendable {
@@ -483,6 +491,70 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
                 ring: AudioReactorRingStyle(radius: 0.36, thickness: 0.012, softness: 0.7, glow: 0.34, roundness: 0.86),
                 wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.008, amplitude: 0.42, smoothing: 0.7, glow: 0.25, radius: 0.56, arcStartDegrees: -145, arcEndDegrees: 145)
             )
+        case .halo:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#4F46E5", secondaryColor: "#8B5CF6", accentColor: "#C7D2FE", glowColor: "#FFFFFF"),
+                spectrum: AudioReactorSpectrumStyle(layout: .circle, barCount: 24, barWidth: 0.4, barHeight: 0.18, spacing: 0.45, radius: 0.6, roundness: 0.95, smoothing: 0.6, glow: 0.4, arcStartDegrees: -180, arcEndDegrees: 180),
+                ring: AudioReactorRingStyle(radius: 0.4, thickness: 0.06, softness: 0.7, glow: 0.95, roundness: 1.0),
+                wave: AudioReactorWaveStyle(layout: .circle, thickness: 0.005, amplitude: 0.2, smoothing: 0.7, glow: 0.3, radius: 0.45, arcStartDegrees: -180, arcEndDegrees: 180)
+            )
+        case .cascade:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#00B7FF", secondaryColor: "#FF2D95", accentColor: "#FFFFFF", glowColor: "#B0F0FF"),
+                spectrum: AudioReactorSpectrumStyle(layout: .bottom, barCount: 96, barWidth: 0.62, barHeight: 0.85, spacing: 0.18, radius: 0.5, roundness: 0.35, smoothing: 0.25, glow: 0.85, arcStartDegrees: -150, arcEndDegrees: 150, mirrored: true),
+                ring: AudioReactorRingStyle(radius: 0.32, thickness: 0.01, softness: 0.55, glow: 0.3, roundness: 0.6),
+                wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.006, amplitude: 0.3, smoothing: 0.4, glow: 0.15, radius: 0.5, arcStartDegrees: -150, arcEndDegrees: 150)
+            )
+        case .ribbon:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#FF7A8A", secondaryColor: "#FFB394", accentColor: "#FFE6CC", glowColor: "#FFF5EB"),
+                spectrum: AudioReactorSpectrumStyle(layout: .arc, barCount: 32, barWidth: 0.35, barHeight: 0.4, spacing: 0.5, radius: 0.55, roundness: 1.0, smoothing: 0.8, glow: 0.3, arcStartDegrees: -140, arcEndDegrees: 140),
+                ring: AudioReactorRingStyle(radius: 0.38, thickness: 0.008, softness: 0.85, glow: 0.4, roundness: 1.0),
+                wave: AudioReactorWaveStyle(layout: .arc, thickness: 0.018, amplitude: 0.9, smoothing: 0.55, glow: 0.55, radius: 0.5, arcStartDegrees: -150, arcEndDegrees: 150)
+            )
+        case .pulse:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#2563EB", secondaryColor: "#06B6D4", accentColor: "#FFFFFF", glowColor: "#E0F7FA"),
+                spectrum: AudioReactorSpectrumStyle(layout: .bottom, barCount: 40, barWidth: 0.3, barHeight: 0.32, spacing: 0.5, radius: 0.55, roundness: 0.7, smoothing: 0.5, glow: 0.45, arcStartDegrees: -150, arcEndDegrees: 150),
+                ring: AudioReactorRingStyle(radius: 0.32, thickness: 0.022, softness: 0.5, glow: 0.9, roundness: 0.85),
+                wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.01, amplitude: 0.4, smoothing: 0.55, glow: 0.35, radius: 0.55, arcStartDegrees: -150, arcEndDegrees: 150)
+            )
+        case .spectro:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#4ADE80", secondaryColor: "#BEF264", accentColor: "#FFFFFF", glowColor: "#E8F8E0"),
+                spectrum: AudioReactorSpectrumStyle(layout: .bottom, barCount: 84, barWidth: 0.18, barHeight: 0.95, spacing: 0.55, radius: 0.5, roundness: 0.05, smoothing: 0.35, glow: 0.25, arcStartDegrees: -150, arcEndDegrees: 150),
+                ring: AudioReactorRingStyle(radius: 0.35, thickness: 0.008, softness: 0.65, glow: 0.2, roundness: 0.8),
+                wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.005, amplitude: 0.25, smoothing: 0.5, glow: 0.1, radius: 0.5, arcStartDegrees: -150, arcEndDegrees: 150)
+            )
+        case .crystal:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#67E8F9", secondaryColor: "#FFFFFF", accentColor: "#BAE6FD", glowColor: "#E0F2FE"),
+                spectrum: AudioReactorSpectrumStyle(layout: .arc, barCount: 56, barWidth: 0.4, barHeight: 0.4, spacing: 0.4, radius: 0.55, roundness: 0.0, smoothing: 0.2, glow: 0.4, arcStartDegrees: -135, arcEndDegrees: 135),
+                ring: AudioReactorRingStyle(radius: 0.38, thickness: 0.01, softness: 0.5, glow: 0.55, roundness: 0.85),
+                wave: AudioReactorWaveStyle(layout: .arc, thickness: 0.006, amplitude: 0.3, smoothing: 0.4, glow: 0.2, radius: 0.55, arcStartDegrees: -135, arcEndDegrees: 135)
+            )
+        case .nebula:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#A78BFA", secondaryColor: "#2DD4BF", accentColor: "#DDD6FE", glowColor: "#FFFFFF"),
+                spectrum: AudioReactorSpectrumStyle(layout: .circle, barCount: 32, barWidth: 0.42, barHeight: 0.3, spacing: 0.45, radius: 0.62, roundness: 1.0, smoothing: 0.92, glow: 0.95, arcStartDegrees: -180, arcEndDegrees: 180),
+                ring: AudioReactorRingStyle(radius: 0.42, thickness: 0.012, softness: 0.95, glow: 0.75, roundness: 1.0),
+                wave: AudioReactorWaveStyle(layout: .circle, thickness: 0.007, amplitude: 0.35, smoothing: 0.85, glow: 0.5, radius: 0.55, arcStartDegrees: -180, arcEndDegrees: 180)
+            )
+        case .vapor:
+            return AudioReactorStyle(
+                presetID: id.rawValue,
+                palette: AudioReactorPalette(primaryColor: "#FAA8E0", secondaryColor: "#D8B4FE", accentColor: "#FBE4FF", glowColor: "#FFFFFF"),
+                spectrum: AudioReactorSpectrumStyle(layout: .bottom, barCount: 32, barWidth: 0.5, barHeight: 0.18, spacing: 0.55, radius: 0.55, roundness: 0.95, smoothing: 0.85, glow: 0.55, arcStartDegrees: -150, arcEndDegrees: 150),
+                ring: AudioReactorRingStyle(radius: 0.35, thickness: 0.012, softness: 0.85, glow: 0.45, roundness: 1.0),
+                wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.022, amplitude: 0.7, smoothing: 0.9, glow: 0.4, radius: 0.55, arcStartDegrees: -150, arcEndDegrees: 150)
+            )
         }
     }
 
@@ -529,6 +601,14 @@ private extension AudioReactorStylePresetID {
         case .minimal: "Minimal"
         case .ambient: "Ambient"
         case .mono: "Mono"
+        case .halo: "Halo"
+        case .cascade: "Cascade"
+        case .ribbon: "Ribbon"
+        case .pulse: "Pulse"
+        case .spectro: "Spectro"
+        case .crystal: "Crystal"
+        case .nebula: "Nebula"
+        case .vapor: "Vapor"
         }
     }
 }
