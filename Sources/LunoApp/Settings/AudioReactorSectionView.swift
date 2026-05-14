@@ -61,6 +61,12 @@ final class AudioReactorSectionView: NSView {
     private let ringGlowSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
     private let ringRoundnessSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
 
+    private let mirrorSpectrumSwitch = NSSwitch()
+    private let colorCycleSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
+    private let beatGateSwitch = NSSwitch()
+    private let motionTrailSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
+    private let advancedBox = NSBox()
+
     private let waveLayoutPopup = NSPopUpButton()
     private let waveThicknessSlider = LabeledValueSlider(minValue: 0, maxValue: 0.08, displayAsPercent: true)
     private let waveAmplitudeSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
@@ -137,6 +143,11 @@ final class AudioReactorSectionView: NSView {
         waveRadiusSlider.value = preferences.style.wave.radius
         waveArcStartSlider.value = preferences.style.wave.arcStartDegrees
         waveArcEndSlider.value = preferences.style.wave.arcEndDegrees
+
+        mirrorSpectrumSwitch.state = preferences.style.spectrum.mirrored ? .on : .off
+        colorCycleSlider.value = preferences.style.colorCycle
+        beatGateSwitch.state = preferences.beatGate ? .on : .off
+        motionTrailSlider.value = preferences.style.motionTrail
     }
 
     private func buildLayout() {
@@ -241,6 +252,8 @@ final class AudioReactorSectionView: NSView {
             labeled("Arc end", control: waveArcEndSlider)
         ]))
 
+        stack.addArrangedSubview(makeAdvancedBox())
+
         wireActions()
         rebuildPresetMenu()
     }
@@ -294,6 +307,13 @@ final class AudioReactorSectionView: NSView {
         waveRadiusSlider.onChange = { [weak self] value in self?.styleField { $0.wave.radius = value } }
         waveArcStartSlider.onChange = { [weak self] value in self?.styleField { $0.wave.arcStartDegrees = value } }
         waveArcEndSlider.onChange = { [weak self] value in self?.styleField { $0.wave.arcEndDegrees = value } }
+
+        mirrorSpectrumSwitch.target = self
+        mirrorSpectrumSwitch.action = #selector(mirrorSpectrumChanged)
+        colorCycleSlider.onChange = { [weak self] value in self?.styleField { $0.colorCycle = value } }
+        beatGateSwitch.target = self
+        beatGateSwitch.action = #selector(beatGateChanged)
+        motionTrailSlider.onChange = { [weak self] value in self?.styleField { $0.motionTrail = value } }
     }
 
     private func labeled(_ title: String, control: NSView) -> NSStackView {
@@ -355,6 +375,25 @@ final class AudioReactorSectionView: NSView {
         popup.selectItem(at: index)
     }
 
+    private func makeAdvancedBox() -> NSBox {
+        let box = advancedBox
+        box.title = "Advanced"
+        box.titlePosition = .atTop
+        box.boxType = .primary
+        let content = NSStackView(views: [
+            labeled("Mirror spectrum", control: mirrorSpectrumSwitch),
+            labeled("Color cycle", control: colorCycleSlider),
+            labeled("Beat gate", control: beatGateSwitch),
+            labeled("Motion trail", control: motionTrailSlider)
+        ])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 6
+        content.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+        box.contentView = content
+        return box
+    }
+
     private func selectPaletteSource(_ source: AudioReactorPaletteSource) {
         guard let index = AudioReactorPaletteSource.allCases.firstIndex(of: source) else { return }
         paletteSourcePopup.selectItem(at: index)
@@ -408,7 +447,9 @@ final class AudioReactorSectionView: NSView {
             waveGlowSlider,
             waveRadiusSlider,
             waveArcStartSlider,
-            waveArcEndSlider
+            waveArcEndSlider,
+            colorCycleSlider,
+            motionTrailSlider
         ].forEach { $0.isEnabled = active }
 
         [
@@ -422,7 +463,10 @@ final class AudioReactorSectionView: NSView {
             glowColorWell,
             paletteSourcePopup,
             spectrumLayoutPopup,
-            waveLayoutPopup
+            waveLayoutPopup,
+            albumModeControl,
+            mirrorSpectrumSwitch,
+            beatGateSwitch
         ].forEach { $0.isEnabled = active }
 
         let usesManualColors = active && preferences.style.palette.source == .manual
@@ -525,6 +569,14 @@ final class AudioReactorSectionView: NSView {
               let layout = AudioReactorVisualizerLayout(rawValue: rawValue)
         else { return }
         styleField { $0.wave.layout = layout }
+    }
+
+    @objc private func mirrorSpectrumChanged(_ sender: NSSwitch) {
+        commitField { $0.style.spectrum.mirrored = sender.state == .on }
+    }
+
+    @objc private func beatGateChanged(_ sender: NSSwitch) {
+        commitField { $0.beatGate = sender.state == .on }
     }
 }
 
