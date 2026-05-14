@@ -132,4 +132,55 @@ final class AudioReactorColorMathTests: XCTestCase {
         let sat = AudioReactorColorMath.rgbToHSL(r: corrected.r, g: corrected.g, b: corrected.b).s
         XCTAssertGreaterThanOrEqual(sat, 0.54)
     }
+
+    func testVividProducesExpectedLightnessPerChannel() {
+        let albumPrimary = AudioReactorColorMath.RGB(r: 0.95, g: 0.2, b: 0.6)
+        let albumSecondary = AudioReactorColorMath.RGB(r: 0.2, g: 0.7, b: 0.9)
+        let albumHighlight = AudioReactorColorMath.RGB(r: 0.95, g: 0.9, b: 0.55)
+
+        let primary = AudioReactorColorMath.applyVivid(
+            role: .primary,
+            albumPrimary: albumPrimary,
+            albumSecondary: albumSecondary,
+            albumHighlight: albumHighlight
+        )
+        let primaryHSL = AudioReactorColorMath.rgbToHSL(r: primary.r, g: primary.g, b: primary.b)
+        XCTAssertEqual(primaryHSL.l, 0.78, accuracy: 0.01)
+        XCTAssertEqual(primaryHSL.s, 1.0, accuracy: 0.01)
+
+        let secondary = AudioReactorColorMath.applyVivid(
+            role: .secondary,
+            albumPrimary: albumPrimary,
+            albumSecondary: albumSecondary,
+            albumHighlight: albumHighlight
+        )
+        let secondaryHSL = AudioReactorColorMath.rgbToHSL(r: secondary.r, g: secondary.g, b: secondary.b)
+        XCTAssertEqual(secondaryHSL.l, 0.65, accuracy: 0.01)
+
+        let glow = AudioReactorColorMath.applyVivid(
+            role: .glow,
+            albumPrimary: albumPrimary,
+            albumSecondary: albumSecondary,
+            albumHighlight: albumHighlight
+        )
+        let glowHSL = AudioReactorColorMath.rgbToHSL(r: glow.r, g: glow.g, b: glow.b)
+        XCTAssertEqual(glowHSL.l, 0.95, accuracy: 0.01)
+        XCTAssertEqual(glowHSL.s, 0.5, accuracy: 0.01)
+    }
+
+    func testVividPullsHueFromCorrectAlbumChannel() {
+        let albumPrimary = AudioReactorColorMath.RGB(r: 0.95, g: 0.2, b: 0.2)   // red
+        let albumSecondary = AudioReactorColorMath.RGB(r: 0.2, g: 0.95, b: 0.2) // green
+        let albumHighlight = AudioReactorColorMath.RGB(r: 0.2, g: 0.2, b: 0.95) // blue
+
+        let primary = AudioReactorColorMath.applyVivid(
+            role: .primary,
+            albumPrimary: albumPrimary,
+            albumSecondary: albumSecondary,
+            albumHighlight: albumHighlight
+        )
+        let primaryHue = AudioReactorColorMath.rgbToHSL(r: primary.r, g: primary.g, b: primary.b).h
+        let albumPrimaryHue = AudioReactorColorMath.rgbToHSL(r: albumPrimary.r, g: albumPrimary.g, b: albumPrimary.b).h
+        XCTAssertEqual(primaryHue, albumPrimaryHue, accuracy: 1.0)
+    }
 }

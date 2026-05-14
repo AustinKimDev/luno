@@ -142,4 +142,33 @@ public enum AudioReactorColorMath {
         let raw = abs(a - b).truncatingRemainder(dividingBy: 360)
         return min(raw, 360 - raw)
     }
+
+    public static func applyVivid(
+        role: ChannelRole,
+        albumPrimary: RGB,
+        albumSecondary: RGB,
+        albumHighlight: RGB
+    ) -> RGB {
+        let (source, sat, lightness): (RGB, Double, Double)
+        switch role {
+        case .primary:
+            source = albumPrimary
+            sat = 1.0
+            lightness = 0.78
+        case .secondary:
+            source = albumSecondary
+            sat = 1.0
+            lightness = 0.65
+        case .accent:
+            source = albumHighlight
+            sat = 0.95
+            lightness = 0.55
+        case .glow:
+            source = albumHighlight
+            sat = 0.5
+            lightness = 0.95
+        }
+        let hue = rgbToHSL(r: source.r, g: source.g, b: source.b).h
+        return hslToRGB(h: hue, s: sat, l: lightness)
+    }
 }
