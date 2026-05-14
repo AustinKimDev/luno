@@ -31,10 +31,28 @@ final class AudioReactorColorMathTests: XCTestCase {
         // Pure green: h=120, s=1, l=0.5
         let green = AudioReactorColorMath.rgbToHSL(r: 0, g: 1, b: 0)
         XCTAssertEqual(green.h, 120, accuracy: 0.001)
+        XCTAssertEqual(green.s, 1, accuracy: 0.001)
+        XCTAssertEqual(green.l, 0.5, accuracy: 0.001)
 
         // Gray: s=0
         let gray = AudioReactorColorMath.rgbToHSL(r: 0.5, g: 0.5, b: 0.5)
         XCTAssertEqual(gray.s, 0, accuracy: 0.001)
         XCTAssertEqual(gray.l, 0.5, accuracy: 0.001)
+    }
+
+    func testHSLToRGBNormalizesOutOfRangeHue() {
+        // 480° is 360° + 120° → should produce the same result as 120° (green).
+        let cycled = AudioReactorColorMath.hslToRGB(h: 480, s: 1, l: 0.5)
+        let direct = AudioReactorColorMath.hslToRGB(h: 120, s: 1, l: 0.5)
+        XCTAssertEqual(cycled.r, direct.r, accuracy: 0.001)
+        XCTAssertEqual(cycled.g, direct.g, accuracy: 0.001)
+        XCTAssertEqual(cycled.b, direct.b, accuracy: 0.001)
+
+        // Negative hue: -60° should equal +300° (magenta).
+        let negative = AudioReactorColorMath.hslToRGB(h: -60, s: 1, l: 0.5)
+        let positive = AudioReactorColorMath.hslToRGB(h: 300, s: 1, l: 0.5)
+        XCTAssertEqual(negative.r, positive.r, accuracy: 0.001)
+        XCTAssertEqual(negative.g, positive.g, accuracy: 0.001)
+        XCTAssertEqual(negative.b, positive.b, accuracy: 0.001)
     }
 }

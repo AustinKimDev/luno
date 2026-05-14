@@ -28,6 +28,7 @@ public enum AudioReactorColorMath {
 
         let s = l > 0.5 ? delta / (2 - maxC - minC) : delta / (maxC + minC)
         var h: Double
+        // maxC was assigned from one of cr/cg/cb via max(), so exact equality is correct.
         if maxC == cr {
             h = ((cg - cb) / delta).truncatingRemainder(dividingBy: 6)
         } else if maxC == cg {
