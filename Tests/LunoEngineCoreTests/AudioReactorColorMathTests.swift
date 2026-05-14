@@ -222,4 +222,39 @@ final class AudioReactorColorMathTests: XCTestCase {
         let level = gate.step(bass: 0.20, deltaTime: 1.0 / 60)
         XCTAssertLessThan(level, 0.10, "bass below 0.25 floor must not fire")
     }
+
+    func testMotionTrailZeroBypassesSmoothing() {
+        var buffer = AudioReactorColorMath.MotionTrailBuffer()
+        let input: [Float] = [0.8, 0.6, 0.4]
+        var output: [Float] = [0, 0, 0]
+        buffer.apply(input: input, trail: 0, into: &output)
+        XCTAssertEqual(output, input)
+    }
+
+    func testMotionTrailKeepsDescendingTail() {
+        var buffer = AudioReactorColorMath.MotionTrailBuffer()
+        var output: [Float] = [0, 0, 0]
+        buffer.apply(input: [1.0, 1.0, 1.0], trail: 0.8, into: &output)
+        buffer.apply(input: [0.0, 0.0, 0.0], trail: 0.8, into: &output)
+        // decay = 0.55 + 0.4 * 0.8 = 0.87
+        XCTAssertEqual(output[0], 0.87, accuracy: 0.001)
+    }
+
+    func testApplyColorCycleNoCycleReturnsInputHex() {
+        let cycled = AudioReactorColorMath.applyColorCycle(hex: "#24C7FF", cycleRate: 0, time: 5)
+        XCTAssertEqual(cycled, "#24C7FF")
+    }
+
+    func testApplyColorCycleFullPeriodReturnsToOriginal() {
+        let original = "#24C7FF"
+        let cycled = AudioReactorColorMath.applyColorCycle(hex: original, cycleRate: 1, time: 10.0)
+        XCTAssertEqual(cycled, original)
+    }
+
+    func testApplyColorCycleHalfPeriodShiftsHue180() {
+        let original = "#FF0000"  // hue 0
+        let cycled = AudioReactorColorMath.applyColorCycle(hex: original, cycleRate: 1, time: 5.0)
+        // 180° hue shift from red is cyan (#00FFFF)
+        XCTAssertEqual(cycled, "#00FFFF")
+    }
 }

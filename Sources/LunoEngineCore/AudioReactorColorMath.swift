@@ -195,4 +195,50 @@ public enum AudioReactorColorMath {
         let hue = rgbToHSL(r: source.r, g: source.g, b: source.b).h
         return hslToRGB(h: hue, s: sat, l: lightness)
     }
+
+    public struct MotionTrailBuffer: Sendable {
+        public var prev: [Float] = []
+
+        public init() {}
+
+        public mutating func apply(input: [Float], trail: Double, into output: inout [Float]) {
+            guard output.count == input.count else {
+                output = input
+                prev = input
+                return
+            }
+            if trail < 0.001 {
+                for i in input.indices { output[i] = input[i] }
+                prev = input
+                return
+            }
+            if prev.count != input.count {
+                prev = Array(repeating: 0, count: input.count)
+            }
+            let decay = Float(0.55 + 0.4 * min(max(trail, 0), 1))
+            for i in input.indices {
+                let value = max(input[i], prev[i] * decay)
+                output[i] = value
+                prev[i] = value
+            }
+        }
+    }
+
+    public static func applyColorCycle(hex: String, cycleRate: Double, time: Double) -> String {
+        guard cycleRate > 0 else { return hex }
+        let trimmed = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#").union(.whitespacesAndNewlines))
+        guard trimmed.count == 6, let value = UInt32(trimmed, radix: 16) else { return hex }
+        let r = Double((value >> 16) & 0xFF) / 255
+        let g = Double((value >> 8) & 0xFF) / 255
+        let b = Double(value & 0xFF) / 255
+        var hsl = rgbToHSL(r: r, g: g, b: b)
+        let degreesPerSecond = cycleRate * 36.0  // 1.0 -> 360°/10 s
+        hsl.h = (hsl.h + time * degreesPerSecond).truncatingRemainder(dividingBy: 360)
+        if hsl.h < 0 { hsl.h += 360 }
+        let rgb = hslToRGB(h: hsl.h, s: hsl.s, l: hsl.l)
+        let ri = UInt8(round(clamp01(rgb.r) * 255))
+        let gi = UInt8(round(clamp01(rgb.g) * 255))
+        let bi = UInt8(round(clamp01(rgb.b) * 255))
+        return String(format: "#%02X%02X%02X", ri, gi, bi)
+    }
 }
