@@ -499,6 +499,10 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
            let overlayPipelineState {
             let style = audioReactorPreferences.style
             let overlayPalette = style.palette.resolved(with: albumPalette)
+            let layoutMetrics = AudioReactorOverlayLayoutMetrics.make(
+                resolution: viewportSize,
+                scale: style.scale
+            )
             let barCount = min(max(style.spectrum.barCount, 8), Self.overlayBarCount)
             if overlaySpectrum.count != barCount {
                 overlaySpectrum = Array(repeating: 0, count: barCount)
@@ -560,6 +564,18 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
                     Float(style.wave.radius),
                     Float(style.wave.arcStartDegrees * .pi / 180),
                     Float(style.wave.arcEndDegrees * .pi / 180)
+                ),
+                layoutStyle0: SIMD4<Float>(
+                    layoutMetrics.scale,
+                    layoutMetrics.bottomRailStart,
+                    layoutMetrics.bottomRailWidth,
+                    layoutMetrics.bottomBaseY
+                ),
+                layoutStyle1: SIMD4<Float>(
+                    layoutMetrics.radialScale,
+                    layoutMetrics.centerY,
+                    0,
+                    0
                 )
             )
 
@@ -689,6 +705,8 @@ internal enum LunoOverlayShaderSource {
         float4 spectrumStyle2;
         float4 waveStyle0;
         float4 waveStyle1;
+        float4 layoutStyle0;
+        float4 layoutStyle1;
     };
 
     struct OverlayVertexOut {
@@ -772,14 +790,20 @@ internal enum LunoOverlayShaderSource {
         float3 accumulatedColor = float3(0.0);
         float accumulatedAlpha = 0.0;
         float aspect = max(uniforms.resolution.x / max(uniforms.resolution.y, 1.0), 0.1);
-        float2 centered = (uv - float2(0.5, 0.53)) * float2(aspect, 1.0);
+        float layoutScale = clamp(uniforms.layoutStyle0.x, 0.5, 1.5);
+        float bottomRailStart = clamp(uniforms.layoutStyle0.y, 0.0, 0.45);
+        float bottomRailWidth = clamp(uniforms.layoutStyle0.z, 0.52, 0.9);
+        float bottomBaseY = clamp(uniforms.layoutStyle0.w, 0.045, 0.14);
+        float radialScale = clamp(uniforms.layoutStyle1.x, 0.45, 1.35);
+        float centerY = clamp(uniforms.layoutStyle1.y, 0.48, 0.6);
+        float2 centered = (uv - float2(0.5, centerY)) * float2(aspect, 1.0);
         float distanceFromCenter = length(centered);
         float angle = atan2(centered.y, centered.x);
 
         if ((uniforms.flags & 1u) != 0u) {
             float strength = clamp(uniforms.bassPulseStrength, 0.0, 1.0);
-            float radius = mix(0.16, 0.46, clamp(uniforms.ringStyle.x, 0.0, 1.0)) + uniforms.bass * 0.08 * strength;
-            float ringWidth = max(pixel * 2.0, 0.003 + clamp(uniforms.ringStyle.y, 0.0, 0.08) + uniforms.rms * 0.012);
+            float radius = (mix(0.16, 0.46, clamp(uniforms.ringStyle.x, 0.0, 1.0)) + uniforms.bass * 0.08 * strength) * radialScale;
+            float ringWidth = max(pixel * 2.0, (0.003 + clamp(uniforms.ringStyle.y, 0.0, 0.08) + uniforms.rms * 0.012) * layoutScale);
             float softness = pixel * 2.0 + clamp(uniforms.ringStyle.z, 0.0, 1.0) * 0.035;
             float glow = clamp(uniforms.ringStyle.w, 0.0, 1.0);
             float roundness = clamp(uniforms.ringStyle2.x, 0.0, 1.0);
@@ -809,8 +833,8 @@ internal enum LunoOverlayShaderSource {
             float glow = clamp(uniforms.spectrumStyle1.w, 0.0, 1.0);
 
             if (isBottomLayout(layout)) {
-                float railStart = 0.075;
-                float railWidth = 0.85;
+                float railStart = bottomRailStart;
+                float railWidth = bottomRailWidth;
                 float railX = (uv.x - railStart) / railWidth;
                 float edgeFade = smoothstep(0.0, 0.065, railX) * (1.0 - smoothstep(0.935, 1.0, railX));
                 if (railX >= 0.0 && railX <= 1.0) {
@@ -820,8 +844,8 @@ internal enum LunoOverlayShaderSource {
                     float value = pow(rawValue, mix(0.55, 1.28, smoothing));
                     float cellWidth = railWidth / float(count);
                     float barCenterX = railStart + (float(index) + 0.5) * cellWidth;
-                    float baseY = 0.058;
-                    float barHeight = 0.012 + value * (0.06 + barHeightControl * 0.24);
+                    float baseY = bottomBaseY;
+                    float barHeight = (0.012 + value * (0.06 + barHeightControl * 0.24)) * layoutScale;
                     float2 center = float2(barCenterX, baseY + barHeight * 0.5);
                     float widthScale = (0.12 + barWidthControl * 0.66) * (1.15 - spacing * 0.62);
                     float2 halfSize = float2(cellWidth * widthScale * 0.5, barHeight * 0.5);
@@ -854,8 +878,8 @@ internal enum LunoOverlayShaderSource {
                     float local = abs(fract(cell) - 0.5);
                     float fill = clamp((0.18 + barWidthControl * 0.78) * (1.08 - spacing * 0.72), 0.04, 0.96);
                     float angularMask = 1.0 - smoothstep(fill * 0.5, fill * 0.5 + 0.045, local);
-                    float baseRadius = mix(0.17, 0.54, radiusControl);
-                    float length = 0.018 + value * (0.055 + barHeightControl * 0.26);
+                    float baseRadius = mix(0.17, 0.54, radiusControl) * radialScale;
+                    float length = (0.018 + value * (0.055 + barHeightControl * 0.26)) * radialScale;
                     float radial = distanceFromCenter - baseRadius;
                     float core = smoothstep(0.0, pixel * 3.0, radial) * (1.0 - smoothstep(length, length + pixel * (4.0 + roundness * 6.0), radial));
                     float glowMask = smoothstep(-0.035 * glow, pixel * 2.0, radial)
@@ -878,16 +902,16 @@ internal enum LunoOverlayShaderSource {
             float radiusControl = clamp(uniforms.waveStyle1.y, 0.0, 1.0);
 
             if (isBottomLayout(layout)) {
-                float railStart = 0.075;
-                float railWidth = 0.85;
+                float railStart = bottomRailStart;
+                float railWidth = bottomRailWidth;
                 float railX = (uv.x - railStart) / railWidth;
                 float edgeFade = smoothstep(0.0, 0.07, railX) * (1.0 - smoothstep(0.93, 1.0, railX));
                 if (railX >= 0.0 && railX <= 1.0) {
                     float rawValue = sampleSpectrum(spectrum, count, railX);
                     float value = pow(rawValue, mix(0.58, 1.35, smoothing));
                     float drift = sin(railX * 9.0 + uniforms.time * 0.55) * 0.006 * (0.35 + uniforms.treble);
-                    float waveY = 0.17 + value * (0.07 + amplitude * 0.26) + drift;
-                    float lineWidth = max(pixel * 1.2, 0.0014 + thickness + uniforms.rms * 0.004);
+                    float waveY = bottomBaseY + (0.11 + value * (0.07 + amplitude * 0.26)) * layoutScale + drift;
+                    float lineWidth = max(pixel * 1.2, (0.0014 + thickness + uniforms.rms * 0.004) * layoutScale);
                     float line = 1.0 - smoothstep(lineWidth, lineWidth + pixel * 4.0, abs(uv.y - waveY));
                     float glowMask = 1.0 - smoothstep(lineWidth * 2.0, lineWidth * (4.0 + glow * 10.0) + pixel * 4.0, abs(uv.y - waveY));
                     float waveAlpha = (line * (0.28 + value * 0.42) + glowMask * glow * (0.04 + value * 0.14)) * edgeFade;
@@ -902,9 +926,9 @@ internal enum LunoOverlayShaderSource {
                     float rawValue = sampleSpectrum(spectrum, count, progress);
                     float value = pow(rawValue, mix(0.58, 1.35, smoothing));
                     float drift = sin(progress * 18.0 + uniforms.time * 0.55) * 0.006 * (0.35 + uniforms.treble);
-                    float baseRadius = mix(0.16, 0.56, radiusControl);
-                    float waveRadius = baseRadius + value * (0.035 + amplitude * 0.22) + drift;
-                    float lineWidth = max(pixel * 1.3, 0.0014 + thickness + uniforms.rms * 0.004);
+                    float baseRadius = mix(0.16, 0.56, radiusControl) * radialScale;
+                    float waveRadius = baseRadius + value * (0.035 + amplitude * 0.22) * radialScale + drift;
+                    float lineWidth = max(pixel * 1.3, (0.0014 + thickness + uniforms.rms * 0.004) * layoutScale);
                     float line = 1.0 - smoothstep(lineWidth, lineWidth + pixel * 4.0, abs(distanceFromCenter - waveRadius));
                     float glowMask = 1.0 - smoothstep(lineWidth * 2.0, lineWidth * (4.0 + glow * 10.0) + pixel * 4.0, abs(distanceFromCenter - waveRadius));
                     float arcEdgeFade = circle ? 1.0 : smoothstep(0.0, 0.045, progress) * (1.0 - smoothstep(0.955, 1.0, progress));
@@ -964,6 +988,8 @@ private struct LunoOverlayUniforms {
     var spectrumStyle2: SIMD4<Float>
     var waveStyle0: SIMD4<Float>
     var waveStyle1: SIMD4<Float>
+    var layoutStyle0: SIMD4<Float>
+    var layoutStyle1: SIMD4<Float>
 }
 
 private extension AudioScalars {

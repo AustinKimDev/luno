@@ -192,6 +192,8 @@ public struct AudioReactorSpectrumStyle: Codable, Equatable, Sendable {
         )
     }
 
+    public static let `default` = AudioReactorStyle.default.spectrum
+
     fileprivate static func clamp01(_ value: Double) -> Double {
         guard value.isFinite else { return 0 }
         return min(max(value, 0), 1)
@@ -232,6 +234,8 @@ public struct AudioReactorRingStyle: Codable, Equatable, Sendable {
             roundness: try container.decodeIfPresent(Double.self, forKey: .roundness) ?? 0.9
         )
     }
+
+    public static let `default` = AudioReactorStyle.default.ring
 }
 
 public struct AudioReactorWaveStyle: Codable, Equatable, Sendable {
@@ -277,6 +281,8 @@ public struct AudioReactorWaveStyle: Codable, Equatable, Sendable {
             arcEndDegrees: try container.decodeIfPresent(Double.self, forKey: .arcEndDegrees) ?? 150
         )
     }
+
+    public static let `default` = AudioReactorStyle.default.wave
 }
 
 public struct AudioReactorStyle: Codable, Equatable, Sendable {
@@ -285,19 +291,26 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
     public var spectrum: AudioReactorSpectrumStyle
     public var ring: AudioReactorRingStyle
     public var wave: AudioReactorWaveStyle
+    public var scale: Double {
+        didSet {
+            scale = Self.clampScale(scale)
+        }
+    }
 
     public init(
         presetID: String?,
         palette: AudioReactorPalette,
         spectrum: AudioReactorSpectrumStyle,
         ring: AudioReactorRingStyle,
-        wave: AudioReactorWaveStyle
+        wave: AudioReactorWaveStyle,
+        scale: Double = 1.0
     ) {
         self.presetID = presetID
         self.palette = palette
         self.spectrum = spectrum
         self.ring = ring
         self.wave = wave
+        self.scale = Self.clampScale(scale)
     }
 
     public init(from decoder: any Decoder) throws {
@@ -307,8 +320,14 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
             palette: try container.decodeIfPresent(AudioReactorPalette.self, forKey: .palette) ?? .default,
             spectrum: try container.decodeIfPresent(AudioReactorSpectrumStyle.self, forKey: .spectrum) ?? Self.default.spectrum,
             ring: try container.decodeIfPresent(AudioReactorRingStyle.self, forKey: .ring) ?? Self.default.ring,
-            wave: try container.decodeIfPresent(AudioReactorWaveStyle.self, forKey: .wave) ?? Self.default.wave
+            wave: try container.decodeIfPresent(AudioReactorWaveStyle.self, forKey: .wave) ?? Self.default.wave,
+            scale: try container.decodeIfPresent(Double.self, forKey: .scale) ?? 1.0
         )
+    }
+
+    public static func clampScale(_ value: Double) -> Double {
+        guard value.isFinite else { return 1 }
+        return min(max(value, 0.5), 1.5)
     }
 
     public static let `default` = preset(.studio)
@@ -380,6 +399,35 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
 
     public static let presets: [AudioReactorStylePreset] = AudioReactorStylePresetID.allCases.map { id in
         AudioReactorStylePreset(id: id.rawValue, name: id.displayName, style: preset(id))
+    }
+}
+
+public struct AudioReactorOverlayLayoutMetrics: Equatable, Sendable {
+    public var scale: Float
+    public var bottomRailStart: Float
+    public var bottomRailWidth: Float
+    public var bottomBaseY: Float
+    public var radialScale: Float
+    public var centerY: Float
+
+    public static func make(resolution: SIMD2<Float>, scale: Double) -> AudioReactorOverlayLayoutMetrics {
+        let width = max(resolution.x, 1)
+        let height = max(resolution.y, 1)
+        let aspect = min(max(width / height, 0.1), 4)
+        let portraitAmount = min(max((1 - aspect) / 0.45, 0), 1)
+        let safeScale = Float(AudioReactorStyle.clampScale(scale))
+        let portraitWidthCompression = 1 - portraitAmount * 0.18
+        let railWidth = min(max(0.85 * portraitWidthCompression * safeScale, 0.52), 0.9)
+        let radialScale = min(max((1 - portraitAmount * 0.24) * safeScale, 0.45), 1.35)
+
+        return AudioReactorOverlayLayoutMetrics(
+            scale: safeScale,
+            bottomRailStart: (1 - railWidth) * 0.5,
+            bottomRailWidth: railWidth,
+            bottomBaseY: 0.058 + portraitAmount * 0.045 + max(safeScale - 1, 0) * 0.012,
+            radialScale: radialScale,
+            centerY: 0.53 + portraitAmount * 0.035
+        )
     }
 }
 

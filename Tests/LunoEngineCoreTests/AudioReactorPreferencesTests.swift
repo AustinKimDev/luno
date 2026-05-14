@@ -14,6 +14,7 @@ final class AudioReactorPreferencesTests: XCTestCase {
         XCTAssertFalse(preferences.showsWaveLine)
         XCTAssertEqual(preferences.overlayOpacity, 0.6, accuracy: 0.001)
         XCTAssertEqual(preferences.style.presetID, "studio")
+        XCTAssertEqual(preferences.style.scale, 1.0, accuracy: 0.001)
         XCTAssertEqual(preferences.style.spectrum.layout, .bottom)
         XCTAssertEqual(preferences.style.spectrum.barCount, 48)
         XCTAssertEqual(preferences.style.ring.thickness, 0.018, accuracy: 0.001)
@@ -92,7 +93,8 @@ final class AudioReactorPreferencesTests: XCTestCase {
                 radius: 3,
                 arcStartDegrees: 360,
                 arcEndDegrees: -360
-            )
+            ),
+            scale: 8
         )
 
         XCTAssertEqual(style.palette.primaryColor, "#24C7FF")
@@ -120,6 +122,53 @@ final class AudioReactorPreferencesTests: XCTestCase {
         XCTAssertEqual(style.wave.smoothing, 0)
         XCTAssertEqual(style.wave.glow, 0)
         XCTAssertEqual(style.wave.radius, 1)
+        XCTAssertEqual(style.scale, 1.5)
+    }
+
+    func testAudioReactorStyleClampsSmallScale() {
+        let style = AudioReactorStyle(
+            presetID: nil,
+            palette: .default,
+            spectrum: .default,
+            ring: .default,
+            wave: .default,
+            scale: -0.5
+        )
+
+        XCTAssertEqual(style.scale, 0.5)
+    }
+
+    func testOverlayLayoutMetricsAreAdaptiveForPortraitScreens() {
+        let landscape = AudioReactorOverlayLayoutMetrics.make(
+            resolution: SIMD2<Float>(2560, 1440),
+            scale: 1
+        )
+        let portrait = AudioReactorOverlayLayoutMetrics.make(
+            resolution: SIMD2<Float>(1080, 1920),
+            scale: 1
+        )
+
+        XCTAssertLessThan(portrait.bottomRailWidth, landscape.bottomRailWidth)
+        XCTAssertEqual(portrait.bottomRailStart, (1 - portrait.bottomRailWidth) / 2, accuracy: 0.001)
+        XCTAssertGreaterThan(portrait.bottomBaseY, landscape.bottomBaseY)
+        XCTAssertLessThan(portrait.radialScale, landscape.radialScale)
+        XCTAssertGreaterThan(portrait.centerY, landscape.centerY)
+    }
+
+    func testOverlayLayoutMetricsApplyScaleWithinSafeBounds() {
+        let compact = AudioReactorOverlayLayoutMetrics.make(
+            resolution: SIMD2<Float>(1920, 1080),
+            scale: 0.5
+        )
+        let large = AudioReactorOverlayLayoutMetrics.make(
+            resolution: SIMD2<Float>(1920, 1080),
+            scale: 1.5
+        )
+
+        XCTAssertLessThan(compact.bottomRailWidth, large.bottomRailWidth)
+        XCTAssertLessThan(compact.radialScale, large.radialScale)
+        XCTAssertEqual(large.scale, 1.5, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(large.bottomRailWidth, 0.9)
     }
 
     func testBuiltInAudioReactorPresetsHaveUniqueStableIDs() {

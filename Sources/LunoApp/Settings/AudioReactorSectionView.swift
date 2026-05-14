@@ -18,6 +18,7 @@ final class AudioReactorSectionView: NSView {
     private let responseControl = NSSegmentedControl(labels: ["Soft", "Punchy", "Hard"], trackingMode: .selectOne, target: nil, action: nil)
     private let overlayOpacitySlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
     private let bassPulseSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
+    private let scaleSlider = LabeledValueSlider(minValue: 0.5, maxValue: 1.5, displayAsPercent: true)
     private let pulseRingSwitch = NSSwitch()
     private let spectrumBarsSwitch = NSSwitch()
     private let waveLineSwitch = NSSwitch()
@@ -82,6 +83,7 @@ final class AudioReactorSectionView: NSView {
         responseControl.selectedSegment = AudioReactorResponse.allCases.firstIndex(of: preferences.response) ?? 1
         overlayOpacitySlider.value = preferences.overlayOpacity
         bassPulseSlider.value = preferences.bassPulseStrength
+        scaleSlider.value = preferences.style.scale
         pulseRingSwitch.state = preferences.showsPulseRing ? .on : .off
         spectrumBarsSwitch.state = preferences.showsSpectrumBars ? .on : .off
         waveLineSwitch.state = preferences.showsWaveLine ? .on : .off
@@ -172,6 +174,7 @@ final class AudioReactorSectionView: NSView {
             labeled("Response", control: responseControl),
             labeled("Overlay opacity", control: overlayOpacitySlider),
             labeled("Bass pulse", control: bassPulseSlider),
+            labeled("Scale", control: scaleSlider),
             labeled("Pulse ring", control: pulseRingSwitch),
             labeled("Spectrum bars", control: spectrumBarsSwitch),
             labeled("Wave line", control: waveLineSwitch)
@@ -239,6 +242,7 @@ final class AudioReactorSectionView: NSView {
         intensitySlider.onChange = { [weak self] value in self?.commitField { $0.intensity = value } }
         overlayOpacitySlider.onChange = { [weak self] value in self?.commitField { $0.overlayOpacity = value } }
         bassPulseSlider.onChange = { [weak self] value in self?.commitField { $0.bassPulseStrength = value } }
+        scaleSlider.onChange = { [weak self] value in self?.styleField { $0.scale = value } }
 
         configureColorWell(primaryColorWell, selector: #selector(colorChanged))
         configureColorWell(secondaryColorWell, selector: #selector(colorChanged))
@@ -362,6 +366,7 @@ final class AudioReactorSectionView: NSView {
             intensitySlider,
             overlayOpacitySlider,
             bassPulseSlider,
+            scaleSlider,
             spectrumBarCountSlider,
             spectrumBarWidthSlider,
             spectrumBarHeightSlider,
@@ -566,8 +571,9 @@ private final class AudioReactorPreviewView: NSView {
 
     private func drawRing(in rect: CGRect, style: AudioReactorStyle, context: CGContext) {
         let center = CGPoint(x: rect.midX, y: rect.midY + 4)
-        let radius = min(rect.width, rect.height) * (0.18 + style.ring.radius * 0.25)
-        let lineWidth = max(1, rect.height * CGFloat(style.ring.thickness))
+        let scale = CGFloat(style.scale)
+        let radius = min(rect.width, rect.height) * (0.18 + style.ring.radius * 0.25) * scale
+        let lineWidth = max(1, rect.height * CGFloat(style.ring.thickness) * scale)
         let color = NSColor(hexString: style.palette.secondaryColor) ?? .systemCyan
         context.setStrokeColor(color.withAlphaComponent(0.42 + style.ring.glow * 0.34).cgColor)
         context.setLineWidth(lineWidth)
@@ -585,7 +591,14 @@ private final class AudioReactorPreviewView: NSView {
 
     private func drawBottomBars(in rect: CGRect, style: AudioReactorStyle, context: CGContext) {
         let count = min(style.spectrum.barCount, sampleValues.count)
-        let rail = rect.insetBy(dx: 28, dy: 24)
+        let scale = CGFloat(style.scale)
+        let railWidth = rect.width * min(max(0.85 * scale, 0.52), 0.9)
+        let rail = CGRect(
+            x: rect.midX - railWidth / 2,
+            y: rect.minY + 24,
+            width: railWidth,
+            height: rect.height - 48
+        )
         let cellWidth = rail.width / CGFloat(count)
         let baseY = rect.maxY - 26
         let colorA = NSColor(hexString: style.palette.primaryColor) ?? .systemCyan
@@ -593,7 +606,7 @@ private final class AudioReactorPreviewView: NSView {
 
         for index in 0..<count {
             let value = sampleValues[index]
-            let height = CGFloat(10 + value * (44 + style.spectrum.barHeight * 56))
+            let height = CGFloat(10 + value * (44 + style.spectrum.barHeight * 56)) * scale
             let width = cellWidth * CGFloat(0.18 + style.spectrum.barWidth * 0.48) * CGFloat(1.15 - style.spectrum.spacing * 0.45)
             let x = rail.minX + CGFloat(index) * cellWidth + (cellWidth - width) / 2
             let y = baseY - height
@@ -606,7 +619,8 @@ private final class AudioReactorPreviewView: NSView {
     private func drawRadialBars(in rect: CGRect, style: AudioReactorStyle, context: CGContext) {
         let count = min(style.spectrum.barCount, sampleValues.count)
         let center = CGPoint(x: rect.midX, y: rect.midY + 4)
-        let baseRadius = min(rect.width, rect.height) * CGFloat(0.18 + style.spectrum.radius * 0.28)
+        let scale = CGFloat(style.scale)
+        let baseRadius = min(rect.width, rect.height) * CGFloat(0.18 + style.spectrum.radius * 0.28) * scale
         let colorA = NSColor(hexString: style.palette.primaryColor) ?? .systemCyan
         let colorB = NSColor(hexString: style.palette.accentColor) ?? .systemPurple
         let start = style.spectrum.layout == .circle ? -180 : style.spectrum.arcStartDegrees
@@ -618,7 +632,7 @@ private final class AudioReactorPreviewView: NSView {
             let unit = Double(index) / Double(max(count - 1, 1))
             let angle = (start + (end - start) * unit) * .pi / 180
             let value = sampleValues[index]
-            let length = CGFloat(10 + value * (24 + style.spectrum.barHeight * 42))
+            let length = CGFloat(10 + value * (24 + style.spectrum.barHeight * 42)) * scale
             let inner = point(center: center, radius: baseRadius, angle: angle)
             let outer = point(center: center, radius: baseRadius + length, angle: angle)
             let color = colorA.blended(withFraction: CGFloat(unit), of: colorB) ?? colorA
@@ -631,30 +645,37 @@ private final class AudioReactorPreviewView: NSView {
 
     private func drawWave(in rect: CGRect, style: AudioReactorStyle, context: CGContext) {
         let color = NSColor(hexString: style.palette.glowColor) ?? .white
+        let scale = CGFloat(style.scale)
         context.setStrokeColor(color.withAlphaComponent(0.62 + style.wave.glow * 0.22).cgColor)
-        context.setLineWidth(max(1, rect.height * CGFloat(style.wave.thickness)))
+        context.setLineWidth(max(1, rect.height * CGFloat(style.wave.thickness) * scale))
         context.setLineCap(.round)
 
         if style.wave.layout == .bottom {
             let path = CGMutablePath()
-            let rail = rect.insetBy(dx: 28, dy: 26)
+            let railWidth = rect.width * min(max(0.85 * scale, 0.52), 0.9)
+            let rail = CGRect(
+                x: rect.midX - railWidth / 2,
+                y: rect.minY + 26,
+                width: railWidth,
+                height: rect.height - 52
+            )
             for index in 0..<sampleValues.count {
                 let x = rail.minX + CGFloat(index) / CGFloat(sampleValues.count - 1) * rail.width
-                let y = rect.maxY - 62 - CGFloat(sampleValues[index]) * CGFloat(22 + style.wave.amplitude * 44)
+                let y = rect.maxY - 62 - CGFloat(sampleValues[index]) * CGFloat(22 + style.wave.amplitude * 44) * scale
                 index == 0 ? path.move(to: CGPoint(x: x, y: y)) : path.addLine(to: CGPoint(x: x, y: y))
             }
             context.addPath(path)
             context.strokePath()
         } else {
             let center = CGPoint(x: rect.midX, y: rect.midY + 4)
-            let baseRadius = min(rect.width, rect.height) * CGFloat(0.16 + style.wave.radius * 0.3)
+            let baseRadius = min(rect.width, rect.height) * CGFloat(0.16 + style.wave.radius * 0.3) * scale
             let start = style.wave.layout == .circle ? -180 : style.wave.arcStartDegrees
             let end = style.wave.layout == .circle ? 180 : style.wave.arcEndDegrees
             let path = CGMutablePath()
             for index in 0..<sampleValues.count {
                 let unit = Double(index) / Double(sampleValues.count - 1)
                 let angle = (start + (end - start) * unit) * .pi / 180
-                let radius = baseRadius + CGFloat(sampleValues[index]) * CGFloat(8 + style.wave.amplitude * 34)
+                let radius = baseRadius + CGFloat(sampleValues[index]) * CGFloat(8 + style.wave.amplitude * 34) * scale
                 let point = point(center: center, radius: radius, angle: angle)
                 index == 0 ? path.move(to: point) : path.addLine(to: point)
             }
