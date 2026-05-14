@@ -29,6 +29,20 @@ final class AudioReactorSectionView: NSView {
     private let glowColorWell = NSColorWell()
     private let paletteSourcePopup = NSPopUpButton()
 
+    private let albumModeControl = NSSegmentedControl(
+        labels: ["Match", "Contrast", "Vivid"],
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
+    private let albumModeLabel = NSTextField(labelWithString: "Album mode")
+    private lazy var albumModeRow: NSStackView = {
+        let stack = NSStackView(views: [albumModeLabel, albumModeControl])
+        stack.orientation = .horizontal
+        stack.spacing = 8
+        return stack
+    }()
+
     private let spectrumLayoutPopup = NSPopUpButton()
     private let spectrumBarCountSlider = LabeledValueSlider(minValue: 8, maxValue: 96)
     private let spectrumBarWidthSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
@@ -93,6 +107,9 @@ final class AudioReactorSectionView: NSView {
         accentColorWell.color = NSColor(hexString: preferences.style.palette.accentColor) ?? .white
         glowColorWell.color = NSColor(hexString: preferences.style.palette.glowColor) ?? .white
         selectPaletteSource(preferences.style.palette.source)
+        let modeIndex = AudioReactorAlbumColorMode.allCases.firstIndex(of: preferences.style.palette.albumColorMode) ?? 1
+        albumModeControl.selectedSegment = modeIndex
+        albumModeRow.isHidden = preferences.style.palette.source != .albumArtwork
 
         selectLayout(spectrumLayoutPopup, preferences.style.spectrum.layout)
         spectrumBarCountSlider.value = Double(preferences.style.spectrum.barCount)
@@ -182,6 +199,7 @@ final class AudioReactorSectionView: NSView {
 
         stack.addArrangedSubview(group("Palette", rows: [
             labeled("Color source", control: paletteSourcePopup),
+            albumModeRow,
             labeled("Primary", control: primaryColorWell),
             labeled("Secondary", control: secondaryColorWell),
             labeled("Accent", control: accentColorWell),
@@ -249,6 +267,8 @@ final class AudioReactorSectionView: NSView {
         configureColorWell(accentColorWell, selector: #selector(colorChanged))
         configureColorWell(glowColorWell, selector: #selector(colorChanged))
         configurePaletteSourcePopup()
+        albumModeControl.target = self
+        albumModeControl.action = #selector(albumModeChanged)
 
         spectrumBarCountSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.barCount = Int(round(value)) } }
         spectrumBarWidthSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.barWidth = value } }
@@ -482,7 +502,13 @@ final class AudioReactorSectionView: NSView {
               let source = AudioReactorPaletteSource(rawValue: rawValue)
         else { return }
         styleField { $0.palette.source = source }
+        albumModeRow.isHidden = source != .albumArtwork
         applyEnabledState()
+    }
+
+    @objc private func albumModeChanged(_ sender: NSSegmentedControl) {
+        guard let mode = AudioReactorAlbumColorMode.allCases[safe: sender.selectedSegment] else { return }
+        commitField { $0.style.palette.albumColorMode = mode }
     }
 
     @objc private func spectrumLayoutChanged(_ sender: NSPopUpButton) {
@@ -518,6 +544,13 @@ private extension AudioReactorPaletteSource {
         case .manual: "Manual"
         case .albumArtwork: "Album Artwork"
         }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard index >= 0 && index < count else { return nil }
+        return self[index]
     }
 }
 
