@@ -55,4 +55,81 @@ final class AudioReactorColorMathTests: XCTestCase {
         XCTAssertEqual(negative.g, positive.g, accuracy: 0.001)
         XCTAssertEqual(negative.b, positive.b, accuracy: 0.001)
     }
+
+    func testContrastLumaCorrectionShiftsAwayFromDarkBackground() {
+        // Album bg: very dark navy. Reactor primary: also dark navy.
+        let albumBg = AudioReactorColorMath.RGB(r: 0.05, g: 0.06, b: 0.18)
+        let albumPrimary = AudioReactorColorMath.RGB(r: 0.92, g: 0.32, b: 0.42)
+        let albumSecondary = AudioReactorColorMath.RGB(r: 0.12, g: 0.55, b: 0.94)
+        let reactor = AudioReactorColorMath.RGB(r: 0.07, g: 0.08, b: 0.22)
+
+        let corrected = AudioReactorColorMath.applyContrast(
+            channel: reactor,
+            role: .primary,
+            albumBackground: albumBg,
+            albumPrimary: albumPrimary,
+            albumSecondary: albumSecondary
+        )
+
+        let reactorLuma = AudioReactorColorMath.luma(r: reactor.r, g: reactor.g, b: reactor.b)
+        let correctedLuma = AudioReactorColorMath.luma(r: corrected.r, g: corrected.g, b: corrected.b)
+        XCTAssertGreaterThan(correctedLuma - reactorLuma, 0.25, "expected luma boost away from dark bg")
+    }
+
+    func testContrastHueRotationOnPrimaryClashWithAlbumPrimary() {
+        let albumBg = AudioReactorColorMath.RGB(r: 0.1, g: 0.1, b: 0.1)
+        let albumPrimary = AudioReactorColorMath.RGB(r: 0.95, g: 0.2, b: 0.2)  // red
+        let albumSecondary = AudioReactorColorMath.RGB(r: 0.2, g: 0.95, b: 0.2)  // green
+        let reactor = AudioReactorColorMath.RGB(r: 0.9, g: 0.18, b: 0.22)  // also red
+
+        let corrected = AudioReactorColorMath.applyContrast(
+            channel: reactor,
+            role: .primary,
+            albumBackground: albumBg,
+            albumPrimary: albumPrimary,
+            albumSecondary: albumSecondary
+        )
+
+        let albumHue = AudioReactorColorMath.rgbToHSL(r: albumPrimary.r, g: albumPrimary.g, b: albumPrimary.b).h
+        let correctedHue = AudioReactorColorMath.rgbToHSL(r: corrected.r, g: corrected.g, b: corrected.b).h
+        let hueDelta = min(abs(correctedHue - albumHue), 360 - abs(correctedHue - albumHue))
+        XCTAssertGreaterThan(hueDelta, 60, "expected hue rotation away from album primary")
+    }
+
+    func testContrastGlowLockedNearWhite() {
+        let albumBg = AudioReactorColorMath.RGB(r: 0.05, g: 0.05, b: 0.05)
+        let albumPrimary = AudioReactorColorMath.RGB(r: 0.9, g: 0.3, b: 0.4)
+        let albumSecondary = AudioReactorColorMath.RGB(r: 0.2, g: 0.7, b: 0.9)
+        let reactor = AudioReactorColorMath.RGB(r: 0.2, g: 0.2, b: 0.2)  // dark
+
+        let corrected = AudioReactorColorMath.applyContrast(
+            channel: reactor,
+            role: .glow,
+            albumBackground: albumBg,
+            albumPrimary: albumPrimary,
+            albumSecondary: albumSecondary
+        )
+
+        let luma = AudioReactorColorMath.luma(r: corrected.r, g: corrected.g, b: corrected.b)
+        XCTAssertGreaterThanOrEqual(luma, 0.85, "glow must lock to luma >= 0.85")
+    }
+
+    func testContrastSaturationFloor() {
+        // After luma boost, an originally low-sat reactor channel should be pushed to >= 0.55 sat.
+        let albumBg = AudioReactorColorMath.RGB(r: 0.05, g: 0.05, b: 0.05)
+        let albumPrimary = AudioReactorColorMath.RGB(r: 0.9, g: 0.3, b: 0.4)
+        let albumSecondary = AudioReactorColorMath.RGB(r: 0.2, g: 0.7, b: 0.9)
+        let reactor = AudioReactorColorMath.RGB(r: 0.5, g: 0.52, b: 0.55)  // near gray
+
+        let corrected = AudioReactorColorMath.applyContrast(
+            channel: reactor,
+            role: .secondary,
+            albumBackground: albumBg,
+            albumPrimary: albumPrimary,
+            albumSecondary: albumSecondary
+        )
+
+        let sat = AudioReactorColorMath.rgbToHSL(r: corrected.r, g: corrected.g, b: corrected.b).s
+        XCTAssertGreaterThanOrEqual(sat, 0.54)
+    }
 }

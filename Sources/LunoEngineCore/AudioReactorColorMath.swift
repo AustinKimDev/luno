@@ -74,4 +74,72 @@ public enum AudioReactorColorMath {
     static func luma(r: Double, g: Double, b: Double) -> Double {
         r * 0.2126 + g * 0.7152 + b * 0.0722
     }
+
+    public enum ChannelRole: Equatable, Sendable {
+        case primary
+        case secondary
+        case accent
+        case glow
+    }
+
+    public static func applyContrast(
+        channel: RGB,
+        role: ChannelRole,
+        albumBackground: RGB,
+        albumPrimary: RGB,
+        albumSecondary: RGB
+    ) -> RGB {
+        // Monochrome album fallback: if album primary is essentially gray, skip correction.
+        let albumPrimaryHSL = rgbToHSL(r: albumPrimary.r, g: albumPrimary.g, b: albumPrimary.b)
+        if albumPrimaryHSL.s < 0.08 {
+            return clampedFinish(channel: channel, role: role)
+        }
+
+        var hsl = rgbToHSL(r: channel.r, g: channel.g, b: channel.b)
+        let channelLuma = luma(r: channel.r, g: channel.g, b: channel.b)
+        let bgLuma = luma(r: albumBackground.r, g: albumBackground.g, b: albumBackground.b)
+
+        // 1. Luma collision
+        if abs(channelLuma - bgLuma) < 0.18 {
+            let direction: Double = bgLuma < 0.5 ? 1 : -1
+            hsl.l = clamp01(hsl.l + direction * 0.45)
+        }
+
+        // 2. Hue collision (primary only)
+        if role == .primary {
+            let albumPrimaryHue = albumPrimaryHSL.h
+            let albumSecondaryHue = rgbToHSL(r: albumSecondary.r, g: albumSecondary.g, b: albumSecondary.b).h
+            let hueDelta = hueDistance(hsl.h, albumPrimaryHue)
+            let satDelta = abs(hsl.s - albumPrimaryHSL.s)
+            if hueDelta < 30 && satDelta < 0.2 {
+                let plus = (hsl.h + 120).truncatingRemainder(dividingBy: 360)
+                let minus = (hsl.h - 120 + 360).truncatingRemainder(dividingBy: 360)
+                let plusDistance = hueDistance(plus, albumSecondaryHue)
+                let minusDistance = hueDistance(minus, albumSecondaryHue)
+                hsl.h = plusDistance > minusDistance ? plus : minus
+            }
+        }
+
+        // 3. Saturation floor
+        if hsl.s < 0.35 {
+            hsl.s = 0.55
+        }
+
+        let rotated = hslToRGB(h: hsl.h, s: hsl.s, l: hsl.l)
+        return clampedFinish(channel: rotated, role: role)
+    }
+
+    private static func clampedFinish(channel: RGB, role: ChannelRole) -> RGB {
+        // 4. Glow lock
+        guard role == .glow else { return channel }
+        let lum = luma(r: channel.r, g: channel.g, b: channel.b)
+        guard lum < 0.85 else { return channel }
+        let hsl = rgbToHSL(r: channel.r, g: channel.g, b: channel.b)
+        return hslToRGB(h: hsl.h, s: hsl.s, l: max(hsl.l, 0.9))
+    }
+
+    static func hueDistance(_ a: Double, _ b: Double) -> Double {
+        let raw = abs(a - b).truncatingRemainder(dividingBy: 360)
+        return min(raw, 360 - raw)
+    }
 }
