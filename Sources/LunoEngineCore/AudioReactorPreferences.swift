@@ -115,13 +115,69 @@ public struct AudioReactorPalette: Codable, Equatable, Sendable {
 
     public func resolved(with albumPalette: AlbumPalette) -> AudioReactorPalette {
         guard source == .albumArtwork else { return self }
-        return AudioReactorPalette(
-            source: source,
-            primaryColor: Self.hexString(from: albumPalette.primary),
-            secondaryColor: Self.hexString(from: albumPalette.secondary),
-            accentColor: Self.hexString(from: albumPalette.highlight),
-            glowColor: Self.hexString(from: Self.mix(albumPalette.highlight, SIMD4<Float>(1, 1, 1, 1), amount: 0.5))
+
+        let bg = Self.rgb(from: albumPalette.background)
+        let albumP = Self.rgb(from: albumPalette.primary)
+        let albumS = Self.rgb(from: albumPalette.secondary)
+        let albumH = Self.rgb(from: albumPalette.highlight)
+
+        switch albumColorMode {
+        case .match:
+            return AudioReactorPalette(
+                source: source,
+                albumColorMode: albumColorMode,
+                primaryColor: Self.hexString(from: albumPalette.primary),
+                secondaryColor: Self.hexString(from: albumPalette.secondary),
+                accentColor: Self.hexString(from: albumPalette.highlight),
+                glowColor: Self.hexString(from: Self.mix(albumPalette.highlight, SIMD4<Float>(1, 1, 1, 1), amount: 0.5))
+            )
+        case .contrast:
+            let primary = AudioReactorColorMath.applyContrast(channel: albumP, role: .primary, albumBackground: bg, albumPrimary: albumP, albumSecondary: albumS)
+            let secondary = AudioReactorColorMath.applyContrast(channel: albumS, role: .secondary, albumBackground: bg, albumPrimary: albumP, albumSecondary: albumS)
+            let accent = AudioReactorColorMath.applyContrast(channel: albumH, role: .accent, albumBackground: bg, albumPrimary: albumP, albumSecondary: albumS)
+            let glowSource = AudioReactorColorMath.RGB(
+                r: (albumH.r + 1) * 0.5,
+                g: (albumH.g + 1) * 0.5,
+                b: (albumH.b + 1) * 0.5
+            )
+            let glow = AudioReactorColorMath.applyContrast(channel: glowSource, role: .glow, albumBackground: bg, albumPrimary: albumP, albumSecondary: albumS)
+            return AudioReactorPalette(
+                source: source,
+                albumColorMode: albumColorMode,
+                primaryColor: Self.hex(from: primary),
+                secondaryColor: Self.hex(from: secondary),
+                accentColor: Self.hex(from: accent),
+                glowColor: Self.hex(from: glow)
+            )
+        case .vivid:
+            let primary = AudioReactorColorMath.applyVivid(role: .primary, albumPrimary: albumP, albumSecondary: albumS, albumHighlight: albumH)
+            let secondary = AudioReactorColorMath.applyVivid(role: .secondary, albumPrimary: albumP, albumSecondary: albumS, albumHighlight: albumH)
+            let accent = AudioReactorColorMath.applyVivid(role: .accent, albumPrimary: albumP, albumSecondary: albumS, albumHighlight: albumH)
+            let glow = AudioReactorColorMath.applyVivid(role: .glow, albumPrimary: albumP, albumSecondary: albumS, albumHighlight: albumH)
+            return AudioReactorPalette(
+                source: source,
+                albumColorMode: albumColorMode,
+                primaryColor: Self.hex(from: primary),
+                secondaryColor: Self.hex(from: secondary),
+                accentColor: Self.hex(from: accent),
+                glowColor: Self.hex(from: glow)
+            )
+        }
+    }
+
+    private static func rgb(from vector: SIMD4<Float>) -> AudioReactorColorMath.RGB {
+        AudioReactorColorMath.RGB(
+            r: Double(min(max(vector.x, 0), 1)),
+            g: Double(min(max(vector.y, 0), 1)),
+            b: Double(min(max(vector.z, 0), 1))
         )
+    }
+
+    private static func hex(from rgb: AudioReactorColorMath.RGB) -> String {
+        let r = UInt8(round(min(max(rgb.r, 0), 1) * 255))
+        let g = UInt8(round(min(max(rgb.g, 0), 1) * 255))
+        let b = UInt8(round(min(max(rgb.b, 0), 1) * 255))
+        return String(format: "#%02X%02X%02X", r, g, b)
     }
 
     private static func normalizedHex(_ hex: String) -> String? {

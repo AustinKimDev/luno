@@ -181,6 +181,7 @@ final class AudioReactorPreferencesTests: XCTestCase {
     func testAlbumArtworkPaletteSourceResolvesFromAlbumPalette() {
         let palette = AudioReactorPalette(
             source: .albumArtwork,
+            albumColorMode: .match,
             primaryColor: "#010203",
             secondaryColor: "#040506",
             accentColor: "#070809",
@@ -314,6 +315,87 @@ final class AudioReactorPreferencesTests: XCTestCase {
         let data = try JSONEncoder().encode(palette)
         let decoded = try JSONDecoder().decode(AudioReactorPalette.self, from: data)
         XCTAssertEqual(decoded.albumColorMode, .vivid)
+    }
+
+    func testResolvedManualSourceIgnoresAlbumMode() {
+        let palette = AudioReactorPalette(
+            source: .manual,
+            albumColorMode: .vivid,
+            primaryColor: "#24C7FF",
+            secondaryColor: "#FF6B9C",
+            accentColor: "#7A5CFF",
+            glowColor: "#FFFFFF"
+        )
+        let resolved = palette.resolved(with: .fallback)
+        XCTAssertEqual(resolved.primaryColor, "#24C7FF")
+    }
+
+    func testResolvedMatchModePreservesAlbumColors() {
+        let palette = AudioReactorPalette(
+            source: .albumArtwork,
+            albumColorMode: .match,
+            primaryColor: "#000000",
+            secondaryColor: "#000000",
+            accentColor: "#000000",
+            glowColor: "#000000"
+        )
+        let album = AlbumPalette(
+            background: SIMD4<Float>(0.1, 0.1, 0.1, 1),
+            primary: SIMD4<Float>(0.9, 0.2, 0.5, 1),
+            secondary: SIMD4<Float>(0.2, 0.6, 0.9, 1),
+            highlight: SIMD4<Float>(0.95, 0.85, 0.5, 1)
+        )
+        let resolved = palette.resolved(with: album)
+        XCTAssertEqual(resolved.primaryColor, "#E63380")
+    }
+
+    func testResolvedContrastModeBoostsAgainstDarkBackground() {
+        let palette = AudioReactorPalette(
+            source: .albumArtwork,
+            albumColorMode: .contrast,
+            primaryColor: "#000000",
+            secondaryColor: "#000000",
+            accentColor: "#000000",
+            glowColor: "#000000"
+        )
+        let album = AlbumPalette(
+            background: SIMD4<Float>(0.05, 0.05, 0.1, 1),
+            primary: SIMD4<Float>(0.10, 0.12, 0.20, 1),     // dark navy primary, low luma
+            secondary: SIMD4<Float>(0.20, 0.70, 0.95, 1),
+            highlight: SIMD4<Float>(0.95, 0.85, 0.5, 1)
+        )
+        let resolved = palette.resolved(with: album)
+        let hexDigits = resolved.primaryColor.dropFirst()  // strip "#"
+        XCTAssertEqual(hexDigits.count, 6)
+        let r = Int(hexDigits.prefix(2), radix: 16) ?? 0
+        let g = Int(hexDigits.dropFirst(2).prefix(2), radix: 16) ?? 0
+        let b = Int(hexDigits.dropFirst(4).prefix(2), radix: 16) ?? 0
+        let luma = Double(r) * 0.2126 / 255 + Double(g) * 0.7152 / 255 + Double(b) * 0.0722 / 255
+        XCTAssertGreaterThan(luma, 0.30, "contrast must lift away from dark navy background")
+    }
+
+    func testResolvedVividModeProducesHighLightnessPrimary() {
+        let palette = AudioReactorPalette(
+            source: .albumArtwork,
+            albumColorMode: .vivid,
+            primaryColor: "#000000",
+            secondaryColor: "#000000",
+            accentColor: "#000000",
+            glowColor: "#000000"
+        )
+        let album = AlbumPalette(
+            background: SIMD4<Float>(0.05, 0.05, 0.05, 1),
+            primary: SIMD4<Float>(0.95, 0.2, 0.4, 1),
+            secondary: SIMD4<Float>(0.2, 0.6, 0.9, 1),
+            highlight: SIMD4<Float>(0.95, 0.85, 0.5, 1)
+        )
+        let resolved = palette.resolved(with: album)
+        let hex = resolved.primaryColor.dropFirst()
+        let r = Int(hex.prefix(2), radix: 16) ?? 0
+        let g = Int(hex.dropFirst(2).prefix(2), radix: 16) ?? 0
+        let b = Int(hex.dropFirst(4).prefix(2), radix: 16) ?? 0
+        let avg = (Double(r) + Double(g) + Double(b)) / (3 * 255)
+        XCTAssertGreaterThan(avg, 0.55, "vivid primary should be high lightness")
     }
 }
 
