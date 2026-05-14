@@ -538,7 +538,7 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
                 time: Float(now - startTime),
                 overlayOpacity: Float(AudioReactorPreferences.clamp(audioReactorPreferences.overlayOpacity)),
                 bassPulseStrength: Float(AudioReactorPreferences.clamp(audioReactorPreferences.bassPulseStrength)),
-                flags: audioReactorPreferences.overlayFlags,
+                flags: audioReactorPreferences.overlayFlags(mirrored: style.spectrum.mirrored),
                 barCount: UInt32(barCount),
                 palettePrimary: Self.normalizedColor(from: overlayPalette.primaryColor),
                 paletteSecondary: Self.normalizedColor(from: overlayPalette.secondaryColor),
@@ -722,6 +722,7 @@ internal enum LunoOverlayShaderSource {
         float4 waveStyle1;
         float4 layoutStyle0;
         float4 layoutStyle1;
+        float gateLevel;
     };
 
     struct OverlayVertexOut {
@@ -816,8 +817,9 @@ internal enum LunoOverlayShaderSource {
         float angle = atan2(centered.y, centered.x);
 
         if ((uniforms.flags & 1u) != 0u) {
+            float ringBass = (uniforms.flags & 16u) != 0u ? uniforms.gateLevel : uniforms.bass;
             float strength = clamp(uniforms.bassPulseStrength, 0.0, 1.0);
-            float radius = (mix(0.16, 0.46, clamp(uniforms.ringStyle.x, 0.0, 1.0)) + uniforms.bass * 0.08 * strength) * radialScale;
+            float radius = (mix(0.16, 0.46, clamp(uniforms.ringStyle.x, 0.0, 1.0)) + ringBass * 0.08 * strength) * radialScale;
             float ringWidth = max(pixel * 2.0, (0.003 + clamp(uniforms.ringStyle.y, 0.0, 0.08) + uniforms.rms * 0.012) * layoutScale);
             float softness = pixel * 2.0 + clamp(uniforms.ringStyle.z, 0.0, 1.0) * 0.035;
             float glow = clamp(uniforms.ringStyle.w, 0.0, 1.0);
@@ -825,14 +827,14 @@ internal enum LunoOverlayShaderSource {
             float shimmer = mix(1.0, 0.78 + 0.22 * sin(angle * 10.0 - uniforms.time * 1.35 + uniforms.treble * 4.0), roundness);
             float outerRing = 1.0 - smoothstep(ringWidth, ringWidth + pixel * 5.0, abs(distanceFromCenter - radius));
             float innerRing = 1.0 - smoothstep(ringWidth * 0.65, ringWidth * 0.65 + softness, abs(distanceFromCenter - radius * mix(0.58, 0.72, roundness)));
-            float halo = pow(1.0 - smoothstep(0.0, radius + 0.18 + uniforms.bass * 0.08, distanceFromCenter), 2.8);
+            float halo = pow(1.0 - smoothstep(0.0, radius + 0.18 + ringBass * 0.08, distanceFromCenter), 2.8);
             float aperture = smoothstep(0.045, 0.16, distanceFromCenter);
             float pulseAlpha = (
-                outerRing * (0.38 + uniforms.bass * 0.34) * shimmer
+                outerRing * (0.38 + ringBass * 0.34) * shimmer
                 + innerRing * (0.05 + roundness * 0.12)
                 + halo * aperture * (0.04 + glow * 0.18 + energy * 0.08)
             ) * strength;
-            float3 pulseColor = mix(coolAccent, mix(warmAccent, glowColor, 0.35), uniforms.bass * 0.45);
+            float3 pulseColor = mix(coolAccent, mix(warmAccent, glowColor, 0.35), ringBass * 0.45);
             accumulatedColor += pulseColor * pulseAlpha;
             accumulatedAlpha += pulseAlpha;
         }
@@ -853,7 +855,15 @@ internal enum LunoOverlayShaderSource {
                 float railX = (uv.x - railStart) / railWidth;
                 float edgeFade = smoothstep(0.0, 0.065, railX) * (1.0 - smoothstep(0.935, 1.0, railX));
                 if (railX >= 0.0 && railX <= 1.0) {
-                    float cell = railX * float(count);
+                    float mirroredRailX = railX;
+                    if ((uniforms.flags & 8u) != 0u) {
+                        // Fold right half onto left half: x ∈ [0.5, 1.0] -> [0.5, 0.0]
+                        if (mirroredRailX > 0.5) {
+                            mirroredRailX = 1.0 - mirroredRailX;
+                        }
+                        mirroredRailX *= 2.0;  // now [0, 1]
+                    }
+                    float cell = mirroredRailX * float(count);
                     uint index = min(uint(floor(cell)), count - 1);
                     float rawValue = clamp(spectrum[index], 0.0, 1.0);
                     float value = pow(rawValue, mix(0.55, 1.28, smoothing));
@@ -886,7 +896,14 @@ internal enum LunoOverlayShaderSource {
                 bool circle = isCircleLayout(layout);
                 float progress = arcProgress(angle, uniforms.spectrumStyle2.x, uniforms.spectrumStyle2.y, circle, insideArc);
                 if (insideArc) {
-                    float cell = progress * float(count);
+                    float effectiveProgress = progress;
+                    if ((uniforms.flags & 8u) != 0u && !circle) {
+                        if (effectiveProgress > 0.5) {
+                            effectiveProgress = 1.0 - effectiveProgress;
+                        }
+                        effectiveProgress *= 2.0;
+                    }
+                    float cell = effectiveProgress * float(count);
                     uint index = min(uint(floor(cell)), count - 1);
                     float rawValue = clamp(spectrum[index], 0.0, 1.0);
                     float value = pow(rawValue, mix(0.55, 1.28, smoothing));
@@ -1027,7 +1044,7 @@ private extension AudioReactorPreferences {
             && (showsPulseRing || showsSpectrumBars || showsWaveLine)
     }
 
-    var overlayFlags: UInt32 {
+    func overlayFlags(mirrored: Bool) -> UInt32 {
         var flags: UInt32 = 0
         if showsPulseRing {
             flags |= 1 << 0
@@ -1037,6 +1054,12 @@ private extension AudioReactorPreferences {
         }
         if showsWaveLine {
             flags |= 1 << 2
+        }
+        if mirrored {
+            flags |= 1 << 3
+        }
+        if beatGate {
+            flags |= 1 << 4
         }
         return flags
     }
