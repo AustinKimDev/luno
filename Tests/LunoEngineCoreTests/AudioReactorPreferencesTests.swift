@@ -287,6 +287,34 @@ final class AudioReactorPreferencesTests: XCTestCase {
 
         XCTAssertEqual(try store.load(), preferences)
     }
+
+    func testAlbumColorModeDecodesDefaultWhenAbsent() throws {
+        let json = """
+        {
+          "source": "albumArtwork",
+          "primaryColor": "#24C7FF",
+          "secondaryColor": "#FF6B9C",
+          "accentColor": "#7A5CFF",
+          "glowColor": "#FFFFFF"
+        }
+        """.data(using: .utf8)!
+        let palette = try JSONDecoder().decode(AudioReactorPalette.self, from: json)
+        XCTAssertEqual(palette.albumColorMode, .contrast)
+    }
+
+    func testAlbumColorModeRoundTrips() throws {
+        let palette = AudioReactorPalette(
+            source: .albumArtwork,
+            albumColorMode: .vivid,
+            primaryColor: "#24C7FF",
+            secondaryColor: "#FF6B9C",
+            accentColor: "#7A5CFF",
+            glowColor: "#FFFFFF"
+        )
+        let data = try JSONEncoder().encode(palette)
+        let decoded = try JSONDecoder().decode(AudioReactorPalette.self, from: data)
+        XCTAssertEqual(decoded.albumColorMode, .vivid)
+    }
 }
 
 private extension AudioReactorPreferences {

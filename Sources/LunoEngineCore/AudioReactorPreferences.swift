@@ -48,8 +48,15 @@ public enum AudioReactorPaletteSource: String, Codable, Equatable, Sendable, Cas
     case albumArtwork
 }
 
+public enum AudioReactorAlbumColorMode: String, Codable, Equatable, Sendable, CaseIterable {
+    case match
+    case contrast
+    case vivid
+}
+
 public struct AudioReactorPalette: Codable, Equatable, Sendable {
     public var source: AudioReactorPaletteSource
+    public var albumColorMode: AudioReactorAlbumColorMode
     public var primaryColor: String
     public var secondaryColor: String
     public var accentColor: String
@@ -57,12 +64,14 @@ public struct AudioReactorPalette: Codable, Equatable, Sendable {
 
     public init(
         source: AudioReactorPaletteSource = .manual,
+        albumColorMode: AudioReactorAlbumColorMode = .contrast,
         primaryColor: String,
         secondaryColor: String,
         accentColor: String,
         glowColor: String
     ) {
         self.source = source
+        self.albumColorMode = albumColorMode
         self.primaryColor = Self.normalizedHex(primaryColor) ?? Self.default.primaryColor
         self.secondaryColor = Self.normalizedHex(secondaryColor) ?? Self.default.secondaryColor
         self.accentColor = Self.normalizedHex(accentColor) ?? Self.default.accentColor
@@ -78,12 +87,14 @@ public struct AudioReactorPalette: Codable, Equatable, Sendable {
 
     private init(
         source: AudioReactorPaletteSource = .manual,
+        albumColorMode: AudioReactorAlbumColorMode = .contrast,
         uncheckedPrimaryColor primaryColor: String,
         secondaryColor: String,
         accentColor: String,
         glowColor: String
     ) {
         self.source = source
+        self.albumColorMode = albumColorMode
         self.primaryColor = primaryColor
         self.secondaryColor = secondaryColor
         self.accentColor = accentColor
@@ -94,6 +105,7 @@ public struct AudioReactorPalette: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             source: try container.decodeIfPresent(AudioReactorPaletteSource.self, forKey: .source) ?? .manual,
+            albumColorMode: try container.decodeIfPresent(AudioReactorAlbumColorMode.self, forKey: .albumColorMode) ?? .contrast,
             primaryColor: try container.decodeIfPresent(String.self, forKey: .primaryColor) ?? Self.default.primaryColor,
             secondaryColor: try container.decodeIfPresent(String.self, forKey: .secondaryColor) ?? Self.default.secondaryColor,
             accentColor: try container.decodeIfPresent(String.self, forKey: .accentColor) ?? Self.default.accentColor,
