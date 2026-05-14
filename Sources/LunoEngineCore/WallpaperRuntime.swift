@@ -350,6 +350,8 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
     private var lastTime = CACurrentMediaTime()
     private var viewportSize = SIMD2<Float>(1, 1)
     private var overlaySpectrum = Array(repeating: Float(0), count: MetalWallpaperRenderer.overlayBarCount)
+    private var beatGate = AudioReactorColorMath.BeatGate()
+    private var motionTrailBuffer = AudioReactorColorMath.MotionTrailBuffer()
     private let displayScale: Float
     private let parameterPack: ShaderParameterPack
     private let backgroundTexture: (any MTLTexture)?
@@ -498,7 +500,21 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
            audioReactorPreferences.shouldDrawOverlay,
            let overlayPipelineState {
             let style = audioReactorPreferences.style
-            let overlayPalette = style.palette.resolved(with: albumPalette)
+            let resolvedPalette = style.palette.resolved(with: albumPalette)
+            let overlayPalette: AudioReactorPalette
+            if style.colorCycle > 0 {
+                let elapsed = now - startTime  // both are CFTimeInterval (Double) per line 460 + 349
+                overlayPalette = AudioReactorPalette(
+                    source: resolvedPalette.source,
+                    albumColorMode: resolvedPalette.albumColorMode,
+                    primaryColor: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.primaryColor, cycleRate: style.colorCycle, time: elapsed),
+                    secondaryColor: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.secondaryColor, cycleRate: style.colorCycle, time: elapsed),
+                    accentColor: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.accentColor, cycleRate: style.colorCycle, time: elapsed),
+                    glowColor: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.glowColor, cycleRate: style.colorCycle, time: elapsed)
+                )
+            } else {
+                overlayPalette = resolvedPalette
+            }
             let layoutMetrics = AudioReactorOverlayLayoutMetrics.make(
                 resolution: viewportSize,
                 scale: style.scale
@@ -507,7 +523,12 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
             if overlaySpectrum.count != barCount {
                 overlaySpectrum = Array(repeating: 0, count: barCount)
             }
-            downsampleShapedSpectrum(rawAudio.spectrum, preferences: audioReactorPreferences)
+            var fresh = Array(repeating: Float(0), count: barCount)
+            audioReactorPreferences.writeDownsampledSpectrum(rawAudio.spectrum, into: &fresh)
+            motionTrailBuffer.apply(input: fresh, trail: style.motionTrail, into: &overlaySpectrum)
+            let gateLevel: Float = audioReactorPreferences.beatGate
+                ? beatGate.step(bass: audio.bass, deltaTime: deltaTime)
+                : audio.bass
             var overlayUniforms = LunoOverlayUniforms(
                 resolution: viewportSize,
                 rms: audio.rms,
@@ -576,7 +597,8 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
                     layoutMetrics.centerY,
                     0,
                     0
-                )
+                ),
+                gateLevel: gateLevel
             )
 
             encoder.setRenderPipelineState(overlayPipelineState)
@@ -617,13 +639,6 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         let amount = min(1, max(0, deltaTime * 1.7))
         smoothedAlbumPalette = smoothedAlbumPalette.interpolated(toward: target, amount: amount)
         return smoothedAlbumPalette
-    }
-
-    private func downsampleShapedSpectrum(
-        _ spectrum: [Float],
-        preferences: AudioReactorPreferences
-    ) {
-        preferences.writeDownsampledSpectrum(spectrum, into: &overlaySpectrum)
     }
 
     private static func makeOverlayPipelineState(
@@ -990,6 +1005,7 @@ private struct LunoOverlayUniforms {
     var waveStyle1: SIMD4<Float>
     var layoutStyle0: SIMD4<Float>
     var layoutStyle1: SIMD4<Float>
+    var gateLevel: Float
 }
 
 private extension AudioScalars {
