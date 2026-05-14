@@ -216,6 +216,7 @@ public struct AudioReactorSpectrumStyle: Codable, Equatable, Sendable {
     public var glow: Double
     public var arcStartDegrees: Double
     public var arcEndDegrees: Double
+    public var mirrored: Bool
 
     public init(
         layout: AudioReactorVisualizerLayout,
@@ -228,7 +229,8 @@ public struct AudioReactorSpectrumStyle: Codable, Equatable, Sendable {
         smoothing: Double,
         glow: Double,
         arcStartDegrees: Double,
-        arcEndDegrees: Double
+        arcEndDegrees: Double,
+        mirrored: Bool = false
     ) {
         self.layout = layout
         self.barCount = Self.clamp(barCount, min: 8, max: 96)
@@ -241,6 +243,7 @@ public struct AudioReactorSpectrumStyle: Codable, Equatable, Sendable {
         self.glow = Self.clamp01(glow)
         self.arcStartDegrees = Self.clampAngle(arcStartDegrees)
         self.arcEndDegrees = Self.clampAngle(arcEndDegrees)
+        self.mirrored = mirrored
     }
 
     public init(from decoder: any Decoder) throws {
@@ -256,7 +259,8 @@ public struct AudioReactorSpectrumStyle: Codable, Equatable, Sendable {
             smoothing: try container.decodeIfPresent(Double.self, forKey: .smoothing) ?? 0.45,
             glow: try container.decodeIfPresent(Double.self, forKey: .glow) ?? 0.48,
             arcStartDegrees: try container.decodeIfPresent(Double.self, forKey: .arcStartDegrees) ?? -150,
-            arcEndDegrees: try container.decodeIfPresent(Double.self, forKey: .arcEndDegrees) ?? 150
+            arcEndDegrees: try container.decodeIfPresent(Double.self, forKey: .arcEndDegrees) ?? 150,
+            mirrored: try container.decodeIfPresent(Bool.self, forKey: .mirrored) ?? false
         )
     }
 

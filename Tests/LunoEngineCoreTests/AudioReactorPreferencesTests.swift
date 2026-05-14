@@ -397,6 +397,36 @@ final class AudioReactorPreferencesTests: XCTestCase {
         let avg = (Double(r) + Double(g) + Double(b)) / (3 * 255)
         XCTAssertGreaterThan(avg, 0.55, "vivid primary should be high lightness")
     }
+
+    func testSpectrumMirroredDefaultsFalseAndRoundTrips() throws {
+        XCTAssertFalse(AudioReactorSpectrumStyle.default.mirrored)
+
+        let style = AudioReactorSpectrumStyle(
+            layout: .bottom,
+            barCount: 48,
+            barWidth: 0.5,
+            barHeight: 0.7,
+            spacing: 0.3,
+            radius: 0.5,
+            roundness: 0.8,
+            smoothing: 0.5,
+            glow: 0.5,
+            arcStartDegrees: -150,
+            arcEndDegrees: 150,
+            mirrored: true
+        )
+        let data = try JSONEncoder().encode(style)
+        let decoded = try JSONDecoder().decode(AudioReactorSpectrumStyle.self, from: data)
+        XCTAssertTrue(decoded.mirrored)
+    }
+
+    func testSpectrumMirroredDecodesDefaultWhenAbsent() throws {
+        let json = """
+        {"layout":"bottom","barCount":48,"barWidth":0.5,"barHeight":0.7,"spacing":0.3,"radius":0.5,"roundness":0.8,"smoothing":0.5,"glow":0.5,"arcStartDegrees":-150,"arcEndDegrees":150}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(AudioReactorSpectrumStyle.self, from: json)
+        XCTAssertFalse(decoded.mirrored)
+    }
 }
 
 private extension AudioReactorPreferences {
