@@ -368,6 +368,12 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
             scale = Self.clampScale(scale)
         }
     }
+    public var colorCycle: Double {
+        didSet { colorCycle = Self.clamp01(colorCycle) }
+    }
+    public var motionTrail: Double {
+        didSet { motionTrail = Self.clamp01(motionTrail) }
+    }
 
     public init(
         presetID: String?,
@@ -375,7 +381,9 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
         spectrum: AudioReactorSpectrumStyle,
         ring: AudioReactorRingStyle,
         wave: AudioReactorWaveStyle,
-        scale: Double = 1.0
+        scale: Double = 1.0,
+        colorCycle: Double = 0,
+        motionTrail: Double = 0
     ) {
         self.presetID = presetID
         self.palette = palette
@@ -383,6 +391,8 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
         self.ring = ring
         self.wave = wave
         self.scale = Self.clampScale(scale)
+        self.colorCycle = Self.clamp01(colorCycle)
+        self.motionTrail = Self.clamp01(motionTrail)
     }
 
     public init(from decoder: any Decoder) throws {
@@ -393,8 +403,15 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
             spectrum: try container.decodeIfPresent(AudioReactorSpectrumStyle.self, forKey: .spectrum) ?? Self.default.spectrum,
             ring: try container.decodeIfPresent(AudioReactorRingStyle.self, forKey: .ring) ?? Self.default.ring,
             wave: try container.decodeIfPresent(AudioReactorWaveStyle.self, forKey: .wave) ?? Self.default.wave,
-            scale: try container.decodeIfPresent(Double.self, forKey: .scale) ?? 1.0
+            scale: try container.decodeIfPresent(Double.self, forKey: .scale) ?? 1.0,
+            colorCycle: try container.decodeIfPresent(Double.self, forKey: .colorCycle) ?? 0,
+            motionTrail: try container.decodeIfPresent(Double.self, forKey: .motionTrail) ?? 0
         )
+    }
+
+    public static func clamp01(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(max(value, 0), 1)
     }
 
     public static func clampScale(_ value: Double) -> Double {

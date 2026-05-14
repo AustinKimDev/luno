@@ -427,6 +427,33 @@ final class AudioReactorPreferencesTests: XCTestCase {
         let decoded = try JSONDecoder().decode(AudioReactorSpectrumStyle.self, from: json)
         XCTAssertFalse(decoded.mirrored)
     }
+
+    func testStyleColorCycleAndMotionTrailDefaultAndClamp() throws {
+        XCTAssertEqual(AudioReactorStyle.default.colorCycle, 0, accuracy: 0.001)
+        XCTAssertEqual(AudioReactorStyle.default.motionTrail, 0, accuracy: 0.001)
+
+        let style = AudioReactorStyle(
+            presetID: nil,
+            palette: .default,
+            spectrum: .default,
+            ring: .default,
+            wave: .default,
+            scale: 1.0,
+            colorCycle: 2.0,
+            motionTrail: -1
+        )
+        XCTAssertEqual(style.colorCycle, 1, accuracy: 0.001)
+        XCTAssertEqual(style.motionTrail, 0, accuracy: 0.001)
+    }
+
+    func testStyleColorCycleMotionTrailDecodeDefaults() throws {
+        let json = """
+        {"presetID":"studio","palette":{"source":"manual","primaryColor":"#24C7FF","secondaryColor":"#FF6B9C","accentColor":"#7A5CFF","glowColor":"#FFFFFF"},"spectrum":{},"ring":{},"wave":{}}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(AudioReactorStyle.self, from: json)
+        XCTAssertEqual(decoded.colorCycle, 0, accuracy: 0.001)
+        XCTAssertEqual(decoded.motionTrail, 0, accuracy: 0.001)
+    }
 }
 
 private extension AudioReactorPreferences {
