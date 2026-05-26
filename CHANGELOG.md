@@ -15,7 +15,7 @@ and this project uses semantic versioning.
 - Local `.luno` package loading with bundled sample content.
 - Now Playing widget with Apple Music and Spotify metadata support.
 - Audio-reactive shader uniforms derived from system audio capture.
-- Release packaging script and tag-based GitHub Release workflow.
+- DMG release packaging script and tag-based GitHub Release workflow.
 
 ### Known Limitations
 

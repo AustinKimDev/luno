@@ -24,7 +24,7 @@ scripts/build-app.sh
 open .build/artifacts/Luno.app
 ```
 
-Package a release zip:
+Package a release DMG:
 
 ```bash
 scripts/package-release.sh 0.1.0
@@ -38,8 +38,8 @@ The first launch imports the bundled `Album Palette` sample package into:
 
 ## Install
 
-Download the latest `Luno-v*-macOS-arm64.zip` file from GitHub Releases,
-unzip it, and move `Luno.app` to `/Applications`.
+Download the latest `Luno-v*-macOS-arm64.dmg` file from GitHub Releases,
+open it, and drag `Luno.app` to `/Applications`.
 
 Luno requires macOS 15 or later. GitHub release builds are currently intended
 for Apple Silicon Macs.
@@ -56,7 +56,7 @@ git push origin main --tags
 ```
 
 Pushing a `v*` tag runs the GitHub Actions release workflow, builds the app,
-creates a GitHub Release, and uploads the zip plus `SHA256SUMS`.
+creates a GitHub Release, and uploads the DMG plus `SHA256SUMS`.
 
 ## License
 

@@ -33,5 +33,5 @@ jobs:
           prerelease: true
           generate_release_notes: true
           files: |
-            dist/Luno-${{ github.ref_name }}-macOS-arm64.zip
+            dist/Luno-${{ github.ref_name }}-macOS-arm64.dmg
             dist/SHA256SUMS
