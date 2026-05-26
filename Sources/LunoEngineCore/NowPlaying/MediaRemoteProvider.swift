@@ -57,8 +57,11 @@ public actor MediaRemoteProvider: NowPlayingProvider, NowPlayingControls {
         guard let getInfo = symbols.getNowPlayingInfo else { return }
         let now = clock.now()
         getInfo(queue) { [weak self] info in
+            guard let provider = self else { return }
             let payload = MediaRemoteInfoPayload(info: info)
-            Task { await self?.handle(payload: payload, now: now) }
+            Task { [provider, payload, now] in
+                await provider.handle(payload: payload, now: now)
+            }
         }
     }
 

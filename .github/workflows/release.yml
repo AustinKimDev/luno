@@ -32,6 +32,7 @@ jobs:
           draft: false
           prerelease: true
           generate_release_notes: true
+          overwrite_files: true
           files: |
             dist/Luno-${{ github.ref_name }}-macOS-arm64.dmg
             dist/SHA256SUMS
