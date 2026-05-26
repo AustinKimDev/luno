@@ -163,9 +163,9 @@ final class NowPlayingViewModel {
             } catch {
                 return
             }
-            if !preferences.keepVisibleWhilePaused, !isHovering {
+            if !self.preferences.keepVisibleWhilePaused, !self.isHovering {
                 withAnimation(.easeIn(duration: 0.4)) {
-                    visible = false
+                    self.visible = false
                 }
             }
         }
@@ -176,9 +176,9 @@ final class NowPlayingViewModel {
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let hoverScale = isHovering ? 0.3 : 1.0
-                let strength = preferences.audioReactivityEnabled ? preferences.audioReactivityIntensity : 0
-                pulseAmplitude = bassLevelProvider() * strength * hoverScale
+                let hoverScale = self.isHovering ? 0.3 : 1.0
+                let strength = self.preferences.audioReactivityEnabled ? self.preferences.audioReactivityIntensity : 0
+                self.pulseAmplitude = self.bassLevelProvider() * strength * hoverScale
             }
         }
     }
