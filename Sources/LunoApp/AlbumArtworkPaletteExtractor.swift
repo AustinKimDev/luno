@@ -5,7 +5,11 @@ import LunoEngineCore
 enum AlbumArtworkPaletteExtractor {
     static func extract(from artworkData: Data) -> AlbumPalette? {
         guard let source = CGImageSourceCreateWithData(artworkData as CFData, nil),
-              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
+              let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceShouldCache: false,
+                kCGImageSourceThumbnailMaxPixelSize: 48
+              ] as CFDictionary)
         else {
             return nil
         }

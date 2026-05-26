@@ -79,6 +79,9 @@ public final class WallpaperRuntime {
                 .defaults
             },
             albumPaletteProvider: albumPaletteProvider,
+            backgroundAudioReactiveProvider: {
+                true
+            },
             usesAudioReactor: false
         )
     }
@@ -91,7 +94,8 @@ public final class WallpaperRuntime {
         pauseWhenOccluded: Bool,
         audioProvider: @escaping @MainActor () -> AudioFeatures,
         audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences,
-        albumPaletteProvider: @escaping @MainActor () -> AlbumPalette = { .fallback }
+        albumPaletteProvider: @escaping @MainActor () -> AlbumPalette = { .fallback },
+        backgroundAudioReactiveProvider: @escaping @MainActor () -> Bool = { true }
     ) throws {
         try show(
             package: package,
@@ -102,6 +106,7 @@ public final class WallpaperRuntime {
             audioProvider: audioProvider,
             audioReactorPreferencesProvider: audioReactorPreferencesProvider,
             albumPaletteProvider: albumPaletteProvider,
+            backgroundAudioReactiveProvider: backgroundAudioReactiveProvider,
             usesAudioReactor: true
         )
     }
@@ -115,6 +120,7 @@ public final class WallpaperRuntime {
         audioProvider: @escaping @MainActor () -> AudioFeatures,
         audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences,
         albumPaletteProvider: @escaping @MainActor () -> AlbumPalette,
+        backgroundAudioReactiveProvider: @escaping @MainActor () -> Bool,
         usesAudioReactor: Bool
     ) throws {
         let screens = targetScreens(displayID: displayID)
@@ -131,6 +137,7 @@ public final class WallpaperRuntime {
                 audioProvider: audioProvider,
                 audioReactorPreferencesProvider: audioReactorPreferencesProvider,
                 albumPaletteProvider: albumPaletteProvider,
+                backgroundAudioReactiveProvider: backgroundAudioReactiveProvider,
                 usesAudioReactor: usesAudioReactor,
                 renderingStateDidChange: { [weak self] in
                     self?.renderingStateDidChange?()
@@ -196,6 +203,7 @@ private final class WallpaperWindowController {
         audioProvider: @escaping @MainActor () -> AudioFeatures,
         audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences,
         albumPaletteProvider: @escaping @MainActor () -> AlbumPalette,
+        backgroundAudioReactiveProvider: @escaping @MainActor () -> Bool,
         usesAudioReactor: Bool,
         renderingStateDidChange: @escaping () -> Void
     ) throws {
@@ -211,6 +219,7 @@ private final class WallpaperWindowController {
             audioProvider: audioProvider,
             audioReactorPreferencesProvider: audioReactorPreferencesProvider,
             albumPaletteProvider: albumPaletteProvider,
+            backgroundAudioReactiveProvider: backgroundAudioReactiveProvider,
             usesAudioReactor: usesAudioReactor
         )
 
@@ -262,6 +271,10 @@ private final class WallpaperWindowController {
     }
 
     func updateFrame(for screen: NSScreen) {
+        guard window.frame != screen.frame else {
+            syncRenderingState()
+            return
+        }
         window.setFrame(screen.frame, display: true)
         syncRenderingState()
     }
@@ -288,6 +301,7 @@ private final class MetalWallpaperView: MTKView {
         audioProvider: @escaping @MainActor () -> AudioFeatures,
         audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences,
         albumPaletteProvider: @escaping @MainActor () -> AlbumPalette,
+        backgroundAudioReactiveProvider: @escaping @MainActor () -> Bool,
         usesAudioReactor: Bool
     ) throws {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -309,6 +323,7 @@ private final class MetalWallpaperView: MTKView {
             audioProvider: audioProvider,
             audioReactorPreferencesProvider: audioReactorPreferencesProvider,
             albumPaletteProvider: albumPaletteProvider,
+            backgroundAudioReactiveProvider: backgroundAudioReactiveProvider,
             usesAudioReactor: usesAudioReactor
         )
         delegate = renderer
@@ -349,9 +364,10 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
     private let startTime = CACurrentMediaTime()
     private var lastTime = CACurrentMediaTime()
     private var viewportSize = SIMD2<Float>(1, 1)
-    private var overlaySpectrum = Array(repeating: Float(0), count: MetalWallpaperRenderer.overlayBarCount)
-    private var beatGate = AudioReactorColorMath.BeatGate()
-    private var motionTrailBuffer = AudioReactorColorMath.MotionTrailBuffer()
+    private var overlaySpectrumByLayer: [String: [Float]] = [:]
+    private var spectrumEnvelopeByLayer: [String: AudioReactorColorMath.SpectrumEnvelopeBuffer] = [:]
+    private var cachedOverlayColorsKey: OverlayColorsKey?
+    private var cachedOverlayColors: OverlayColors?
     private let displayScale: Float
     private let parameterPack: ShaderParameterPack
     private let backgroundTexture: (any MTLTexture)?
@@ -359,6 +375,7 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
     private let audioProvider: @MainActor () -> AudioFeatures
     private let audioReactorPreferencesProvider: @MainActor () -> AudioReactorPreferences
     private let albumPaletteProvider: @MainActor () -> AlbumPalette
+    private let backgroundAudioReactiveProvider: @MainActor () -> Bool
     private let usesAudioReactor: Bool
     private var smoothedAlbumPalette = AlbumPalette.fallback
     private var hasSampledAlbumPalette = false
@@ -370,6 +387,7 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         audioProvider: @escaping @MainActor () -> AudioFeatures,
         audioReactorPreferencesProvider: @escaping @MainActor () -> AudioReactorPreferences,
         albumPaletteProvider: @escaping @MainActor () -> AlbumPalette,
+        backgroundAudioReactiveProvider: @escaping @MainActor () -> Bool,
         usesAudioReactor: Bool
     ) throws {
         guard let device = view.device,
@@ -382,6 +400,7 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         self.audioProvider = audioProvider
         self.audioReactorPreferencesProvider = audioReactorPreferencesProvider
         self.albumPaletteProvider = albumPaletteProvider
+        self.backgroundAudioReactiveProvider = backgroundAudioReactiveProvider
         self.usesAudioReactor = usesAudioReactor
         self.displayScale = Float(view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
         self.parameterPack = ShaderParameterPack.make(manifest: package.manifest, preset: preset)
@@ -463,17 +482,21 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         let deltaTime = Float(now - lastTime)
         let rawAudio = audioProvider()
         let audioReactorPreferences = audioReactorPreferencesProvider()
-        let audio = usesAudioReactor ? shapedScalars(rawAudio, preferences: audioReactorPreferences) : rawAudio.scalars
+        let audioRouting = WallpaperAudioRouting(
+            usesAudioReactor: usesAudioReactor,
+            backgroundAudioReactiveEnabled: backgroundAudioReactiveProvider()
+        )
+        let backgroundAudio = audioRouting.backgroundScalars(rawAudio: rawAudio, preferences: audioReactorPreferences)
         let albumPalette = smoothedPalette(toward: albumPaletteProvider(), deltaTime: deltaTime)
         var uniforms = LunoShaderUniforms(
             time: Float(now - startTime),
             deltaTime: deltaTime,
             resolution: viewportSize,
             displayScale: displayScale,
-            audioRMS: audio.rms,
-            audioBass: audio.bass,
-            audioMid: audio.mid,
-            audioTreble: audio.treble,
+            audioRMS: backgroundAudio.rms,
+            audioBass: backgroundAudio.bass,
+            audioMid: backgroundAudio.mid,
+            audioTreble: backgroundAudio.treble,
             parameter0: parameterPack.numeric,
             colorParameter0: parameterPack.color0,
             colorParameter1: parameterPack.color1,
@@ -499,134 +522,108 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         if usesAudioReactor,
            audioReactorPreferences.shouldDrawOverlay,
            let overlayPipelineState {
+            let reactorAudio = audioRouting.reactorScalars(rawAudio: rawAudio, preferences: audioReactorPreferences)
             let style = audioReactorPreferences.style
-            let resolvedPalette = style.palette.resolved(with: albumPalette)
-            let overlayPalette: AudioReactorPalette
-            if style.colorCycle > 0 {
-                let elapsed = now - startTime  // both are CFTimeInterval (Double) per line 460 + 349
-                overlayPalette = AudioReactorPalette(
-                    source: resolvedPalette.source,
-                    albumColorMode: resolvedPalette.albumColorMode,
-                    primaryColor: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.primaryColor, cycleRate: style.colorCycle, time: elapsed),
-                    secondaryColor: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.secondaryColor, cycleRate: style.colorCycle, time: elapsed),
-                    accentColor: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.accentColor, cycleRate: style.colorCycle, time: elapsed),
-                    glowColor: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.glowColor, cycleRate: style.colorCycle, time: elapsed)
-                )
-            } else {
-                overlayPalette = resolvedPalette
-            }
+            let layers = audioReactorPreferences.activeSpectrumLayers
+            let overlayColors = resolvedOverlayColors(
+                style: style,
+                albumPalette: albumPalette,
+                elapsed: now - startTime
+            )
             let layoutMetrics = AudioReactorOverlayLayoutMetrics.make(
                 resolution: viewportSize,
                 scale: style.scale
             )
-            let barCount = min(max(style.spectrum.barCount, 8), Self.overlayBarCount)
-            if overlaySpectrum.count != barCount {
-                overlaySpectrum = Array(repeating: 0, count: barCount)
-            }
-            var fresh = Array(repeating: Float(0), count: barCount)
-            audioReactorPreferences.writeDownsampledSpectrum(rawAudio.spectrum, into: &fresh)
-            motionTrailBuffer.apply(input: fresh, trail: style.motionTrail, into: &overlaySpectrum)
-            let gateLevel: Float = audioReactorPreferences.beatGate
-                ? beatGate.step(bass: audio.bass, deltaTime: deltaTime)
-                : audio.bass
-            var overlayUniforms = LunoOverlayUniforms(
-                resolution: viewportSize,
-                rms: audio.rms,
-                bass: audio.bass,
-                mid: audio.mid,
-                treble: audio.treble,
-                time: Float(now - startTime),
-                overlayOpacity: Float(AudioReactorPreferences.clamp(audioReactorPreferences.overlayOpacity)),
-                bassPulseStrength: Float(AudioReactorPreferences.clamp(audioReactorPreferences.bassPulseStrength)),
-                flags: audioReactorPreferences.overlayFlags(mirrored: style.spectrum.mirrored),
-                barCount: UInt32(barCount),
-                palettePrimary: Self.normalizedColor(from: overlayPalette.primaryColor),
-                paletteSecondary: Self.normalizedColor(from: overlayPalette.secondaryColor),
-                paletteAccent: Self.normalizedColor(from: overlayPalette.accentColor),
-                paletteGlow: Self.normalizedColor(from: overlayPalette.glowColor),
-                ringStyle: SIMD4<Float>(
-                    Float(style.ring.radius),
-                    Float(style.ring.thickness),
-                    Float(style.ring.softness),
-                    Float(style.ring.glow)
-                ),
-                ringStyle2: SIMD4<Float>(
-                    Float(style.ring.roundness),
-                    0,
-                    0,
-                    0
-                ),
-                spectrumStyle0: SIMD4<Float>(
-                    style.spectrum.layout.overlayCode,
-                    Float(style.spectrum.barWidth),
-                    Float(style.spectrum.barHeight),
-                    Float(style.spectrum.spacing)
-                ),
-                spectrumStyle1: SIMD4<Float>(
-                    Float(style.spectrum.radius),
-                    Float(style.spectrum.roundness),
-                    Float(style.spectrum.smoothing),
-                    Float(style.spectrum.glow)
-                ),
-                spectrumStyle2: SIMD4<Float>(
-                    Float(style.spectrum.arcStartDegrees * .pi / 180),
-                    Float(style.spectrum.arcEndDegrees * .pi / 180),
-                    0,
-                    0
-                ),
-                waveStyle0: SIMD4<Float>(
-                    style.wave.layout.overlayCode,
-                    Float(style.wave.thickness),
-                    Float(style.wave.amplitude),
-                    Float(style.wave.smoothing)
-                ),
-                waveStyle1: SIMD4<Float>(
-                    Float(style.wave.glow),
-                    Float(style.wave.radius),
-                    Float(style.wave.arcStartDegrees * .pi / 180),
-                    Float(style.wave.arcEndDegrees * .pi / 180)
-                ),
-                layoutStyle0: SIMD4<Float>(
-                    layoutMetrics.scale,
-                    layoutMetrics.bottomRailStart,
-                    layoutMetrics.bottomRailWidth,
-                    layoutMetrics.bottomBaseY
-                ),
-                layoutStyle1: SIMD4<Float>(
-                    layoutMetrics.radialScale,
-                    layoutMetrics.centerY,
-                    0,
-                    0
-                ),
-                gateLevel: gateLevel
-            )
-
             encoder.setRenderPipelineState(overlayPipelineState)
-            encoder.setFragmentBytes(&overlayUniforms, length: MemoryLayout<LunoOverlayUniforms>.stride, index: 0)
-            overlaySpectrum.withUnsafeBufferPointer { buffer in
-                if let baseAddress = buffer.baseAddress {
-                    encoder.setFragmentBytes(baseAddress, length: MemoryLayout<Float>.stride * buffer.count, index: 1)
+            var activeIDs = Set<String>()
+            for layer in layers {
+                activeIDs.insert(layer.id)
+                let spectrumStyle = layer.spectrum
+                let barCount = min(max(spectrumStyle.barCount, 8), Self.overlayBarCount)
+                var freshSpectrum = Array(repeating: Float(0), count: barCount)
+                audioReactorPreferences.writeDownsampledSpectrum(rawAudio.spectrum, into: &freshSpectrum)
+
+                var overlaySpectrum = overlaySpectrumByLayer[layer.id] ?? Array(repeating: 0, count: barCount)
+                if overlaySpectrum.count != barCount {
+                    overlaySpectrum = Array(repeating: 0, count: barCount)
                 }
+                var envelope = spectrumEnvelopeByLayer[layer.id] ?? AudioReactorColorMath.SpectrumEnvelopeBuffer()
+                envelope.apply(
+                    input: freshSpectrum,
+                    smoothing: spectrumStyle.smoothing,
+                    deltaTime: deltaTime,
+                    into: &overlaySpectrum
+                )
+                spectrumEnvelopeByLayer[layer.id] = envelope
+                overlaySpectrumByLayer[layer.id] = overlaySpectrum
+
+                var overlayUniforms = LunoOverlayUniforms(
+                    resolution: viewportSize,
+                    rms: reactorAudio.rms,
+                    bass: reactorAudio.bass,
+                    mid: reactorAudio.mid,
+                    treble: reactorAudio.treble,
+                    time: Float(now - startTime),
+                    overlayOpacity: Float(AudioReactorPreferences.clamp(audioReactorPreferences.overlayOpacity * layer.opacity)),
+                    bassPulseStrength: 0,
+                    flags: audioReactorPreferences.overlayFlags(mirrored: spectrumStyle.mirrored),
+                    barCount: UInt32(barCount),
+                    palettePrimary: overlayColors.primary,
+                    paletteSecondary: overlayColors.secondary,
+                    paletteAccent: overlayColors.accent,
+                    paletteGlow: overlayColors.glow,
+                    ringStyle: .zero,
+                    ringStyle2: .zero,
+                    spectrumStyle0: SIMD4<Float>(
+                        spectrumStyle.layout.overlayCode,
+                        Float(spectrumStyle.barWidth),
+                        Float(spectrumStyle.barHeight),
+                        Float(spectrumStyle.spacing)
+                    ),
+                    spectrumStyle1: SIMD4<Float>(
+                        Float(spectrumStyle.radius),
+                        Float(spectrumStyle.roundness),
+                        Float(spectrumStyle.smoothing),
+                        Float(spectrumStyle.glow)
+                    ),
+                    spectrumStyle2: SIMD4<Float>(
+                        Float(spectrumStyle.arcStartDegrees * .pi / 180),
+                        Float(spectrumStyle.arcEndDegrees * .pi / 180),
+                        0,
+                        0
+                    ),
+                    waveStyle0: .zero,
+                    waveStyle1: .zero,
+                    layoutStyle0: SIMD4<Float>(
+                        layoutMetrics.scale,
+                        layoutMetrics.bottomRailStart,
+                        layoutMetrics.bottomRailWidth,
+                        layoutMetrics.bottomBaseY
+                    ),
+                    layoutStyle1: SIMD4<Float>(
+                        layoutMetrics.radialScale,
+                        layoutMetrics.centerY,
+                        0,
+                        0
+                    ),
+                    gateLevel: reactorAudio.bass
+                )
+
+                encoder.setFragmentBytes(&overlayUniforms, length: MemoryLayout<LunoOverlayUniforms>.stride, index: 0)
+                overlaySpectrum.withUnsafeBufferPointer { buffer in
+                    if let baseAddress = buffer.baseAddress {
+                        encoder.setFragmentBytes(baseAddress, length: MemoryLayout<Float>.stride * buffer.count, index: 1)
+                    }
+                }
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             }
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            overlaySpectrumByLayer = overlaySpectrumByLayer.filter { activeIDs.contains($0.key) }
+            spectrumEnvelopeByLayer = spectrumEnvelopeByLayer.filter { activeIDs.contains($0.key) }
         }
         encoder.endEncoding()
 
         commandBuffer.present(drawable)
         commandBuffer.commit()
-    }
-
-    private func shapedScalars(
-        _ features: AudioFeatures,
-        preferences: AudioReactorPreferences
-    ) -> AudioScalars {
-        guard preferences.isEnabled else { return .silent }
-        return AudioScalars(
-            rms: preferences.shaped(features.rms),
-            bass: preferences.shaped(features.bass),
-            mid: preferences.shaped(features.mid),
-            treble: preferences.shaped(features.treble)
-        )
     }
 
     private func smoothedPalette(toward target: AlbumPalette, deltaTime: Float) -> AlbumPalette {
@@ -639,6 +636,83 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
         let amount = min(1, max(0, deltaTime * 1.7))
         smoothedAlbumPalette = smoothedAlbumPalette.interpolated(toward: target, amount: amount)
         return smoothedAlbumPalette
+    }
+
+    private func resolvedOverlayColors(
+        style: AudioReactorStyle,
+        albumPalette: AlbumPalette,
+        elapsed: CFTimeInterval
+    ) -> OverlayColors {
+        guard style.colorCycle <= 0 else {
+            let resolvedPalette = style.palette.resolved(with: albumPalette)
+            return OverlayColors(
+                primary: Self.normalizedColor(from: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.primaryColor, cycleRate: style.colorCycle, time: elapsed)),
+                secondary: Self.normalizedColor(from: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.secondaryColor, cycleRate: style.colorCycle, time: elapsed)),
+                accent: Self.normalizedColor(from: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.accentColor, cycleRate: style.colorCycle, time: elapsed)),
+                glow: Self.normalizedColor(from: AudioReactorColorMath.applyColorCycle(hex: resolvedPalette.glowColor, cycleRate: style.colorCycle, time: elapsed))
+            )
+        }
+
+        let key = OverlayColorsKey(
+            palette: style.palette,
+            albumPalette: style.palette.source == .albumArtwork ? albumPalette : nil
+        )
+        if cachedOverlayColorsKey == key, let cachedOverlayColors {
+            return cachedOverlayColors
+        }
+
+        let colors = Self.baseOverlayColors(for: style.palette, albumPalette: albumPalette)
+        cachedOverlayColorsKey = key
+        cachedOverlayColors = colors
+        return colors
+    }
+
+    private static func baseOverlayColors(
+        for palette: AudioReactorPalette,
+        albumPalette: AlbumPalette
+    ) -> OverlayColors {
+        guard palette.source == .albumArtwork else {
+            return OverlayColors(
+                primary: normalizedColor(from: palette.primaryColor),
+                secondary: normalizedColor(from: palette.secondaryColor),
+                accent: normalizedColor(from: palette.accentColor),
+                glow: normalizedColor(from: palette.glowColor)
+            )
+        }
+
+        let background = rgb(from: albumPalette.background)
+        let primary = rgb(from: albumPalette.primary)
+        let secondary = rgb(from: albumPalette.secondary)
+        let highlight = rgb(from: albumPalette.highlight)
+
+        switch palette.albumColorMode {
+        case .match:
+            return OverlayColors(
+                primary: quantizedColor(albumPalette.primary),
+                secondary: quantizedColor(albumPalette.secondary),
+                accent: quantizedColor(albumPalette.highlight),
+                glow: quantizedColor(mix(albumPalette.highlight, SIMD4<Float>(1, 1, 1, 1), amount: 0.5))
+            )
+        case .contrast:
+            let glowSource = AudioReactorColorMath.RGB(
+                r: (highlight.r + 1) * 0.5,
+                g: (highlight.g + 1) * 0.5,
+                b: (highlight.b + 1) * 0.5
+            )
+            return OverlayColors(
+                primary: quantizedColor(from: AudioReactorColorMath.applyContrast(channel: primary, role: .primary, albumBackground: background, albumPrimary: primary, albumSecondary: secondary)),
+                secondary: quantizedColor(from: AudioReactorColorMath.applyContrast(channel: secondary, role: .secondary, albumBackground: background, albumPrimary: primary, albumSecondary: secondary)),
+                accent: quantizedColor(from: AudioReactorColorMath.applyContrast(channel: highlight, role: .accent, albumBackground: background, albumPrimary: primary, albumSecondary: secondary)),
+                glow: quantizedColor(from: AudioReactorColorMath.applyContrast(channel: glowSource, role: .glow, albumBackground: background, albumPrimary: primary, albumSecondary: secondary))
+            )
+        case .vivid:
+            return OverlayColors(
+                primary: quantizedColor(from: AudioReactorColorMath.applyVivid(role: .primary, albumPrimary: primary, albumSecondary: secondary, albumHighlight: highlight)),
+                secondary: quantizedColor(from: AudioReactorColorMath.applyVivid(role: .secondary, albumPrimary: primary, albumSecondary: secondary, albumHighlight: highlight)),
+                accent: quantizedColor(from: AudioReactorColorMath.applyVivid(role: .accent, albumPrimary: primary, albumSecondary: secondary, albumHighlight: highlight)),
+                glow: quantizedColor(from: AudioReactorColorMath.applyVivid(role: .glow, albumPrimary: primary, albumSecondary: secondary, albumHighlight: highlight))
+            )
+        }
     }
 
     private static func makeOverlayPipelineState(
@@ -685,6 +759,37 @@ private final class MetalWallpaperRenderer: NSObject, MTKViewDelegate {
             Float(value & 0xFF) / 255,
             1
         )
+    }
+
+    private static func rgb(from vector: SIMD4<Float>) -> AudioReactorColorMath.RGB {
+        AudioReactorColorMath.RGB(
+            r: Double(min(max(vector.x, 0), 1)),
+            g: Double(min(max(vector.y, 0), 1)),
+            b: Double(min(max(vector.z, 0), 1))
+        )
+    }
+
+    private static func quantizedColor(from rgb: AudioReactorColorMath.RGB) -> SIMD4<Float> {
+        SIMD4<Float>(
+            Float(UInt8(round(min(max(rgb.r, 0), 1) * 255))) / 255,
+            Float(UInt8(round(min(max(rgb.g, 0), 1) * 255))) / 255,
+            Float(UInt8(round(min(max(rgb.b, 0), 1) * 255))) / 255,
+            1
+        )
+    }
+
+    private static func quantizedColor(_ vector: SIMD4<Float>) -> SIMD4<Float> {
+        SIMD4<Float>(
+            Float(UInt8(round(min(max(vector.x, 0), 1) * 255))) / 255,
+            Float(UInt8(round(min(max(vector.y, 0), 1) * 255))) / 255,
+            Float(UInt8(round(min(max(vector.z, 0), 1) * 255))) / 255,
+            1
+        )
+    }
+
+    private static func mix(_ start: SIMD4<Float>, _ end: SIMD4<Float>, amount: Float) -> SIMD4<Float> {
+        let t = min(max(amount, 0), 1)
+        return start + (end - start) * t
     }
 
     func resetTiming() {
@@ -1025,6 +1130,18 @@ private struct LunoOverlayUniforms {
     var gateLevel: Float
 }
 
+private struct OverlayColors: Equatable {
+    var primary: SIMD4<Float>
+    var secondary: SIMD4<Float>
+    var accent: SIMD4<Float>
+    var glow: SIMD4<Float>
+}
+
+private struct OverlayColorsKey: Equatable {
+    var palette: AudioReactorPalette
+    var albumPalette: AlbumPalette?
+}
+
 private extension AudioScalars {
     var featuresForRuntime: AudioFeatures {
         AudioFeatures(
@@ -1041,25 +1158,13 @@ private extension AudioReactorPreferences {
     var shouldDrawOverlay: Bool {
         isEnabled
             && Self.clamp(overlayOpacity) > 0
-            && (showsPulseRing || showsSpectrumBars || showsWaveLine)
+            && !activeSpectrumLayers.isEmpty
     }
 
     func overlayFlags(mirrored: Bool) -> UInt32 {
-        var flags: UInt32 = 0
-        if showsPulseRing {
-            flags |= 1 << 0
-        }
-        if showsSpectrumBars {
-            flags |= 1 << 1
-        }
-        if showsWaveLine {
-            flags |= 1 << 2
-        }
+        var flags: UInt32 = 1 << 1
         if mirrored {
             flags |= 1 << 3
-        }
-        if beatGate {
-            flags |= 1 << 4
         }
         return flags
     }

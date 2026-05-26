@@ -39,4 +39,10 @@ public final class LocalPackageLibrary {
     public func importPackage(from sourceURL: URL) throws -> LunoPackageRecord {
         try archiveService.importPackage(from: sourceURL, into: libraryURL)
     }
+
+    public func removePackage(id: String) throws {
+        let packageURL = libraryURL.appending(path: "\(id).luno", directoryHint: .isDirectory)
+        guard fileManager.fileExists(atPath: packageURL.path) else { return }
+        try fileManager.removeItem(at: packageURL)
+    }
 }

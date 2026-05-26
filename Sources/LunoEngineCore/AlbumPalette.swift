@@ -53,6 +53,7 @@ public enum AlbumPaletteExtractor {
 
     public static func extract(from samples: [Sample]) -> AlbumPalette {
         var buckets: [Int: Bucket] = [:]
+        buckets.reserveCapacity(min(samples.count, 1_331))
 
         for sample in samples where sample.alpha > 8 {
             let color = Color(sample)

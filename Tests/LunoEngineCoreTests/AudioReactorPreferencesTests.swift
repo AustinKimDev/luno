@@ -8,17 +8,25 @@ final class AudioReactorPreferencesTests: XCTestCase {
         XCTAssertTrue(preferences.isEnabled)
         XCTAssertEqual(preferences.intensity, 0.8, accuracy: 0.001)
         XCTAssertEqual(preferences.response, .punchy)
-        XCTAssertEqual(preferences.bassPulseStrength, 0.75, accuracy: 0.001)
-        XCTAssertTrue(preferences.showsPulseRing)
+        XCTAssertEqual(preferences.bassPulseStrength, 0.28, accuracy: 0.001)
+        XCTAssertFalse(preferences.showsPulseRing)
         XCTAssertTrue(preferences.showsSpectrumBars)
         XCTAssertFalse(preferences.showsWaveLine)
-        XCTAssertEqual(preferences.overlayOpacity, 0.6, accuracy: 0.001)
+        XCTAssertEqual(preferences.overlayOpacity, 0.38, accuracy: 0.001)
         XCTAssertEqual(preferences.style.presetID, "studio")
+        XCTAssertEqual(preferences.style.spectrumLayers.count, 1)
+        XCTAssertEqual(preferences.style.spectrumLayers[0].spectrum, preferences.style.spectrum)
         XCTAssertEqual(preferences.style.scale, 1.0, accuracy: 0.001)
         XCTAssertEqual(preferences.style.spectrum.layout, .bottom)
-        XCTAssertEqual(preferences.style.spectrum.barCount, 48)
-        XCTAssertEqual(preferences.style.ring.thickness, 0.018, accuracy: 0.001)
+        XCTAssertEqual(preferences.style.spectrum.barCount, 44)
+        XCTAssertEqual(preferences.style.spectrum.barWidth, 0.3, accuracy: 0.001)
+        XCTAssertEqual(preferences.style.spectrum.barHeight, 0.42, accuracy: 0.001)
+        XCTAssertEqual(preferences.style.spectrum.glow, 0.18, accuracy: 0.001)
+        XCTAssertEqual(preferences.style.ring.thickness, 0.007, accuracy: 0.001)
+        XCTAssertEqual(preferences.style.ring.glow, 0.22, accuracy: 0.001)
         XCTAssertEqual(preferences.style.wave.layout, .bottom)
+        XCTAssertEqual(preferences.style.wave.thickness, 0.005, accuracy: 0.001)
+        XCTAssertEqual(preferences.style.wave.glow, 0.12, accuracy: 0.001)
         XCTAssertEqual(preferences.style.palette.source, .manual)
     }
 
@@ -59,6 +67,70 @@ final class AudioReactorPreferencesTests: XCTestCase {
 
         XCTAssertEqual(decoded.style, .default)
         XCTAssertEqual(decoded.style.palette.primaryColor, "#24C7FF")
+    }
+
+    func testLegacyStudioDefaultsMigrateToQuieterDefaults() throws {
+        let json = """
+        {
+          "isEnabled": true,
+          "intensity": 0.8,
+          "response": "punchy",
+          "bassPulseStrength": 0.75,
+          "showsPulseRing": true,
+          "showsSpectrumBars": true,
+          "showsWaveLine": false,
+          "overlayOpacity": 0.6,
+          "style": {
+            "presetID": "studio",
+            "palette": {
+              "source": "manual",
+              "albumColorMode": "contrast",
+              "primaryColor": "#24C7FF",
+              "secondaryColor": "#FF6B9C",
+              "accentColor": "#7A5CFF",
+              "glowColor": "#FFFFFF"
+            },
+            "spectrum": {
+              "layout": "bottom",
+              "barCount": 48,
+              "barWidth": 0.48,
+              "barHeight": 0.74,
+              "spacing": 0.35,
+              "radius": 0.56,
+              "roundness": 0.82,
+              "smoothing": 0.45,
+              "glow": 0.48,
+              "arcStartDegrees": -150,
+              "arcEndDegrees": 150,
+              "mirrored": false
+            },
+            "ring": {
+              "radius": 0.36,
+              "thickness": 0.018,
+              "softness": 0.55,
+              "glow": 0.62,
+              "roundness": 0.9
+            },
+            "wave": {
+              "layout": "bottom",
+              "thickness": 0.012,
+              "amplitude": 0.55,
+              "smoothing": 0.6,
+              "glow": 0.42,
+              "radius": 0.58,
+              "arcStartDegrees": -150,
+              "arcEndDegrees": 150
+            },
+            "scale": 1,
+            "colorCycle": 0,
+            "motionTrail": 0
+          }
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(AudioReactorPreferences.self, from: json)
+
+        XCTAssertEqual(decoded, .defaults)
     }
 
     func testAudioReactorStyleClampsUnsafeGeometryValues() {
@@ -102,6 +174,8 @@ final class AudioReactorPreferencesTests: XCTestCase {
         XCTAssertEqual(style.palette.accentColor, "#123456")
         XCTAssertEqual(style.palette.glowColor, "#FFFFFF")
         XCTAssertEqual(style.palette.source, .manual)
+        XCTAssertEqual(style.spectrumLayers.count, 1)
+        XCTAssertEqual(style.spectrumLayers[0].spectrum.barCount, 96)
         XCTAssertEqual(style.spectrum.barCount, 96)
         XCTAssertEqual(style.spectrum.barWidth, 0)
         XCTAssertEqual(style.spectrum.barHeight, 1)
@@ -183,6 +257,8 @@ final class AudioReactorPreferencesTests: XCTestCase {
             let style = AudioReactorStyle.preset(id)
             XCTAssertEqual(style.presetID, id.rawValue, "presetID mismatch for \(id)")
             XCTAssertGreaterThan(style.spectrum.barCount, 0, "\(id) has zero bar count")
+            XCTAssertEqual(style.spectrumLayers.count, 1, "\(id) should expose one spectrum layer")
+            XCTAssertEqual(style.spectrumLayers[0].spectrum, style.spectrum, "\(id) layer should mirror preset spectrum")
             XCTAssertTrue(style.palette.primaryColor.hasPrefix("#"), "\(id) primary color is not hex")
             XCTAssertEqual(style.palette.primaryColor.count, 7, "\(id) primary color hex length wrong")
         }
@@ -472,6 +548,73 @@ final class AudioReactorPreferencesTests: XCTestCase {
         let decoded = try JSONDecoder().decode(AudioReactorStyle.self, from: json)
         XCTAssertEqual(decoded.colorCycle, 0, accuracy: 0.001)
         XCTAssertEqual(decoded.motionTrail, 0, accuracy: 0.001)
+        XCTAssertEqual(decoded.spectrumLayers.count, 1)
+        XCTAssertEqual(decoded.spectrumLayers[0].spectrum, decoded.spectrum)
+    }
+
+    func testLegacyPreferencesCreateSpectrumLayerFromSpectrumStyle() throws {
+        let json = """
+        {
+          "isEnabled": true,
+          "intensity": 0.8,
+          "response": "punchy",
+          "bassPulseStrength": 0.28,
+          "showsPulseRing": false,
+          "showsSpectrumBars": true,
+          "showsWaveLine": false,
+          "overlayOpacity": 0.38,
+          "style": {
+            "presetID": "studio",
+            "palette": {"source":"manual","primaryColor":"#24C7FF","secondaryColor":"#FF6B9C","accentColor":"#7A5CFF","glowColor":"#FFFFFF"},
+            "spectrum": {"layout":"arc","barCount":72,"barWidth":0.4,"barHeight":0.6,"spacing":0.3,"radius":0.5,"roundness":0.8,"smoothing":0.35,"glow":0.4,"arcStartDegrees":-120,"arcEndDegrees":120},
+            "ring": {},
+            "wave": {}
+          }
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(AudioReactorPreferences.self, from: json)
+
+        XCTAssertEqual(decoded.style.spectrumLayers.count, 1)
+        XCTAssertEqual(decoded.style.spectrumLayers[0].spectrum.layout, .arc)
+        XCTAssertEqual(decoded.style.spectrumLayers[0].spectrum.barCount, 72)
+    }
+
+    func testLegacyPreferencesWithoutSpectrumBarsCreateNoLayers() throws {
+        let json = """
+        {"isEnabled":true,"intensity":0.8,"response":"punchy","bassPulseStrength":0.28,"showsPulseRing":true,"showsSpectrumBars":false,"showsWaveLine":true,"overlayOpacity":0.38}
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(AudioReactorPreferences.self, from: json)
+
+        XCTAssertTrue(decoded.style.spectrumLayers.isEmpty)
+    }
+
+    func testSpectrumLayerAddDuplicateAndRemove() {
+        var preferences = AudioReactorPreferences.defaults
+        let firstID = preferences.style.spectrumLayers[0].id
+
+        let addedID = preferences.addSpectrumLayer(duplicating: firstID)
+
+        XCTAssertNotNil(addedID)
+        XCTAssertEqual(preferences.style.spectrumLayers.count, 2)
+        XCTAssertNotEqual(preferences.style.spectrumLayers[0].id, preferences.style.spectrumLayers[1].id)
+        XCTAssertEqual(preferences.style.spectrumLayers[1].spectrum, preferences.style.spectrumLayers[0].spectrum)
+
+        preferences.removeSpectrumLayer(id: firstID)
+
+        XCTAssertEqual(preferences.style.spectrumLayers.count, 1)
+        XCTAssertEqual(preferences.style.spectrumLayers[0].id, addedID)
+    }
+
+    func testSpectrumLayersClampToMaximum() {
+        var preferences = AudioReactorPreferences.defaults
+
+        for _ in 0..<16 {
+            _ = preferences.addSpectrumLayer()
+        }
+
+        XCTAssertEqual(preferences.style.spectrumLayers.count, AudioReactorStyle.maxSpectrumLayerCount)
     }
 
     func testBeatGateDefaultsFalseAndRoundTrips() throws {

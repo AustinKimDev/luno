@@ -1,20 +1,51 @@
-#if canImport(ScreenCaptureKit)
 import AudioToolbox
-import CoreMedia
+import CoreAudio
 import Foundation
-import ScreenCaptureKit
 
 @available(macOS 15.0, *)
-public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStreamDelegate {
+public enum SystemAudioCaptureError: Error {
+    case processTapUnavailable
+    case aggregateDeviceUnavailable
+    case ioProcCreationFailed(OSStatus)
+    case ioProcStartFailed(OSStatus)
+}
+
+enum CoreAudioTapSampleReader {
+    static func copyFirstFloatChannel(from audioBufferList: UnsafePointer<AudioBufferList>) -> [Float] {
+        let buffers = UnsafeMutableAudioBufferListPointer(
+            UnsafeMutablePointer(mutating: audioBufferList)
+        )
+        guard let firstBuffer = buffers.first,
+              let data = firstBuffer.mData
+        else {
+            return []
+        }
+
+        let sampleCount = Int(firstBuffer.mDataByteSize) / MemoryLayout<Float>.stride
+        guard sampleCount > 0 else { return [] }
+
+        let samples = data.assumingMemoryBound(to: Float.self)
+        return Array(UnsafeBufferPointer(start: samples, count: sampleCount))
+    }
+}
+
+@available(macOS 15.0, *)
+public final class SystemAudioCaptureService: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.luno.audio-capture", qos: .userInteractive)
     private let lock = NSLock()
     private let analyzer = AudioSpectrumAnalyzer()
-    private var stream: SCStream?
+    private let nowPlayingPulseAnalyzer = NowPlayingAudioPulseAnalyzer()
+    private var tap: AudioHardwareTap?
+    private var aggregateDevice: AudioHardwareAggregateDevice?
+    private var ioProcID: AudioDeviceIOProcID?
+    private var sampleRate: Double = 48_000
+    private var analysisSamples: [Float] = []
+    private var lastAnalysisUptime: UInt64 = 0
     private var latestFeatures = AudioFeatures.silent
+    private var latestNowPlayingBassLevel: Float = 0
+    @MainActor public var didStop: (() -> Void)?
 
-    public override init() {
-        super.init()
-    }
+    public init() {}
 
     public var scalars: AudioScalars {
         features.scalars
@@ -26,125 +57,154 @@ public final class SystemAudioCaptureService: NSObject, SCStreamOutput, SCStream
         return latestFeatures
     }
 
+    public var nowPlayingBassLevel: Float {
+        lock.lock()
+        defer { lock.unlock() }
+        return latestNowPlayingBassLevel
+    }
+
     @MainActor
     public func start() async throws {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let display = content.displays.first else {
-            return
+        guard tap == nil, aggregateDevice == nil, ioProcID == nil else { return }
+
+        let system = AudioHardwareSystem.shared
+        let excludedProcesses = (try? system.process(for: getpid())?.id).map { [$0] } ?? []
+        let tapDescription = CATapDescription(monoGlobalTapButExcludeProcesses: excludedProcesses)
+        tapDescription.name = "Luno Audio Reactor Tap"
+        tapDescription.isPrivate = true
+        tapDescription.muteBehavior = CATapMuteBehavior(rawValue: 0)!
+
+        guard let tap = try system.makeProcessTap(description: tapDescription) else {
+            throw SystemAudioCaptureError.processTapUnavailable
         }
+        self.tap = tap
 
-        let filter = SCContentFilter(display: display, excludingWindows: [])
-        let configuration = SCStreamConfiguration()
-        configuration.width = 2
-        configuration.height = 2
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-        configuration.queueDepth = 3
-        configuration.capturesAudio = true
-        configuration.excludesCurrentProcessAudio = true
-        configuration.sampleRate = 48_000
-        configuration.channelCount = 2
+        do {
+            sampleRate = max(1, (try? tap.format.mSampleRate) ?? 48_000)
 
-        let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
-        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
-        try await stream.startCapture()
-        self.stream = stream
+            let aggregateUID = "com.luno.audio-reactor.\(UUID().uuidString)"
+            let aggregateDescription: [String: Any] = [
+                kAudioAggregateDeviceNameKey: "Luno Audio Reactor",
+                kAudioAggregateDeviceUIDKey: aggregateUID,
+                kAudioAggregateDeviceIsPrivateKey: true,
+                kAudioAggregateDeviceTapAutoStartKey: true,
+                kAudioAggregateDeviceTapListKey: [
+                    [
+                        kAudioSubTapUIDKey: try tap.uid,
+                        kAudioSubTapDriftCompensationKey: true,
+                        kAudioSubTapDriftCompensationQualityKey: kAudioAggregateDriftCompensationHighQuality
+                    ]
+                ]
+            ]
+
+            guard let aggregateDevice = try system.makeAggregateDevice(description: aggregateDescription) else {
+                throw SystemAudioCaptureError.aggregateDeviceUnavailable
+            }
+            self.aggregateDevice = aggregateDevice
+
+            analysisSamples.reserveCapacity(AudioSpectrumAnalyzer.analysisSampleCount)
+
+            var ioProcID: AudioDeviceIOProcID?
+            let createStatus = AudioDeviceCreateIOProcID(
+                aggregateDevice.id,
+                Self.audioIOProc,
+                Unmanaged.passUnretained(self).toOpaque(),
+                &ioProcID
+            )
+            guard createStatus == noErr, let ioProcID else {
+                throw SystemAudioCaptureError.ioProcCreationFailed(createStatus)
+            }
+            self.ioProcID = ioProcID
+
+            let startStatus = AudioDeviceStart(aggregateDevice.id, ioProcID)
+            guard startStatus == noErr else {
+                throw SystemAudioCaptureError.ioProcStartFailed(startStatus)
+            }
+        } catch {
+            stopCapture(reset: true)
+            throw error
+        }
     }
 
     @MainActor
     public func stop() async {
-        guard let stream else { return }
-        try? await stream.stopCapture()
-        self.stream = nil
+        stopCapture(reset: true)
     }
 
-    public func stream(
-        _ stream: SCStream,
-        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
-        of outputType: SCStreamOutputType
-    ) {
-        guard outputType == .audio, sampleBuffer.isValid else { return }
-        let sampleRate = sampleRate(from: sampleBuffer) ?? 48_000
+    private func stopCapture(reset: Bool) {
+        let system = AudioHardwareSystem.shared
+        if let aggregateDevice, let ioProcID {
+            AudioDeviceStop(aggregateDevice.id, ioProcID)
+            AudioDeviceDestroyIOProcID(aggregateDevice.id, ioProcID)
+        }
+        if let aggregateDevice {
+            try? system.destroyAggregateDevice(aggregateDevice)
+        }
+        if let tap {
+            try? system.destroyProcessTap(tap)
+        }
 
-        withFloatSamples(from: sampleBuffer) { buffer in
-            guard !buffer.isEmpty else { return }
-            let features = analyzer.analyzeFeatures(samples: buffer, sampleRate: sampleRate)
+        ioProcID = nil
+        aggregateDevice = nil
+        tap = nil
+        queue.async { [weak self] in
+            self?.analysisSamples.removeAll(keepingCapacity: true)
+            self?.lastAnalysisUptime = 0
+        }
+        if reset {
+            resetFeatures()
+        }
+    }
+
+    private static let audioIOProc: AudioDeviceIOProc = { _, _, inputData, _, _, _, clientData in
+        guard let clientData else { return noErr }
+        let service = Unmanaged<SystemAudioCaptureService>
+            .fromOpaque(clientData)
+            .takeUnretainedValue()
+        service.processInput(audioBufferList: inputData)
+        return noErr
+    }
+
+    private func processInput(audioBufferList: UnsafePointer<AudioBufferList>) {
+        let samples = CoreAudioTapSampleReader.copyFirstFloatChannel(from: audioBufferList)
+        guard !samples.isEmpty else { return }
+        let sampleRate = self.sampleRate
+        queue.async { [analyzer, nowPlayingPulseAnalyzer, lock] in
+            self.analysisSamples.append(contentsOf: samples)
+            if self.analysisSamples.count > AudioSpectrumAnalyzer.analysisSampleCount {
+                self.analysisSamples.removeFirst(
+                    self.analysisSamples.count - AudioSpectrumAnalyzer.analysisSampleCount
+                )
+            }
+
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard self.lastAnalysisUptime == 0
+                    || now - self.lastAnalysisUptime >= 33_000_000
+            else {
+                return
+            }
+            self.lastAnalysisUptime = now
+
+            let nowPlayingBassLevel = nowPlayingPulseAnalyzer.bassLevel(
+                samples: samples,
+                sampleRate: sampleRate
+            )
+            let features = analyzer.analyze(samples: self.analysisSamples, sampleRate: sampleRate)
             lock.lock()
-            latestFeatures = features
+            self.latestFeatures = features
+            self.latestNowPlayingBassLevel = nowPlayingBassLevel
             lock.unlock()
         }
     }
 
-    private func sampleRate(from sampleBuffer: CMSampleBuffer) -> Double? {
-        guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(format)
-        else {
-            return nil
-        }
-        return streamDescription.pointee.mSampleRate
+    private func resetFeatures() {
+        lock.lock()
+        latestFeatures = .silent
+        latestNowPlayingBassLevel = 0
+        lock.unlock()
     }
 
-    private func withFloatSamples(
-        from sampleBuffer: CMSampleBuffer,
-        _ body: (UnsafeBufferPointer<Float>) -> Void
-    ) {
-        guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(format)
-        else {
-            return
-        }
-
-        let description = streamDescription.pointee
-        guard description.mFormatID == kAudioFormatLinearPCM,
-              description.mFormatFlags & kAudioFormatFlagIsFloat != 0
-        else {
-            return
-        }
-
-        // ScreenCaptureKit delivers non-interleaved stereo Float32, so the AudioBufferList
-        // needs one slot per channel. A stack-allocated AudioBufferList only reserves one
-        // slot, which produces kCMSampleBufferError_ArrayTooSmall (-12737). Query the
-        // required size first, then allocate raw bytes to hold N buffers.
-        var sizeNeeded = 0
-        let sizeStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sampleBuffer,
-            bufferListSizeNeededOut: &sizeNeeded,
-            bufferListOut: nil,
-            bufferListSize: 0,
-            blockBufferAllocator: nil,
-            blockBufferMemoryAllocator: nil,
-            flags: 0,
-            blockBufferOut: nil
-        )
-        guard sizeStatus == noErr, sizeNeeded > 0 else { return }
-
-        let listPtr = UnsafeMutableRawPointer.allocate(
-            byteCount: sizeNeeded,
-            alignment: MemoryLayout<AudioBufferList>.alignment
-        )
-        defer { listPtr.deallocate() }
-        let listAddr = listPtr.assumingMemoryBound(to: AudioBufferList.self)
-
-        var blockBuffer: CMBlockBuffer?
-        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sampleBuffer,
-            bufferListSizeNeededOut: nil,
-            bufferListOut: listAddr,
-            bufferListSize: sizeNeeded,
-            blockBufferAllocator: kCFAllocatorDefault,
-            blockBufferMemoryAllocator: kCFAllocatorDefault,
-            flags: UInt32(kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment),
-            blockBufferOut: &blockBuffer
-        )
-        guard status == noErr else { return }
-
-        let abl = UnsafeMutableAudioBufferListPointer(listAddr)
-        guard abl.count > 0, let data = abl[0].mData else { return }
-        let count = Int(abl[0].mDataByteSize) / MemoryLayout<Float>.stride
-        let pointer = data.assumingMemoryBound(to: Float.self)
-        let buffer = UnsafeBufferPointer(start: pointer, count: count)
-        withExtendedLifetime(blockBuffer) {
-            body(buffer)
-        }
+    deinit {
+        stopCapture(reset: false)
     }
 }
-#endif

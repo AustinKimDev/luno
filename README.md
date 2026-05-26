@@ -24,11 +24,43 @@ scripts/build-app.sh
 open .build/artifacts/Luno.app
 ```
 
-The first launch imports the bundled `Aurora Field` sample package into:
+Package a release zip:
+
+```bash
+scripts/package-release.sh 0.1.0
+```
+
+The first launch imports the bundled `Album Palette` sample package into:
 
 ```text
 ~/Library/Application Support/Luno/Packages
 ```
+
+## Install
+
+Download the latest `Luno-v*-macOS-arm64.zip` file from GitHub Releases,
+unzip it, and move `Luno.app` to `/Applications`.
+
+Luno requires macOS 15 or later. GitHub release builds are currently intended
+for Apple Silicon Macs.
+
+## Release
+
+Releases are created from version tags:
+
+```bash
+swift test
+scripts/package-release.sh 0.1.0
+git tag v0.1.0
+git push origin main --tags
+```
+
+Pushing a `v*` tag runs the GitHub Actions release workflow, builds the app,
+creates a GitHub Release, and uploads the zip plus `SHA256SUMS`.
+
+## License
+
+Luno is available under the MIT License. See [LICENSE](LICENSE).
 
 ## Current Features
 

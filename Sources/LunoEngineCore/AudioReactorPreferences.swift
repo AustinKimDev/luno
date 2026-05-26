@@ -289,6 +289,39 @@ public struct AudioReactorSpectrumStyle: Codable, Equatable, Sendable {
     }
 }
 
+public struct AudioReactorSpectrumLayer: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var isEnabled: Bool
+    public var opacity: Double
+    public var spectrum: AudioReactorSpectrumStyle
+
+    public init(
+        id: String = UUID().uuidString,
+        name: String,
+        isEnabled: Bool = true,
+        opacity: Double = 1.0,
+        spectrum: AudioReactorSpectrumStyle
+    ) {
+        self.id = id.isEmpty ? UUID().uuidString : id
+        self.name = name.isEmpty ? "Spectrum" : name
+        self.isEnabled = isEnabled
+        self.opacity = AudioReactorSpectrumStyle.clamp01(opacity)
+        self.spectrum = spectrum
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString,
+            name: try container.decodeIfPresent(String.self, forKey: .name) ?? "Spectrum",
+            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true,
+            opacity: try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 1.0,
+            spectrum: try container.decodeIfPresent(AudioReactorSpectrumStyle.self, forKey: .spectrum) ?? .default
+        )
+    }
+}
+
 public struct AudioReactorRingStyle: Codable, Equatable, Sendable {
     public var radius: Double
     public var thickness: Double
@@ -366,9 +399,14 @@ public struct AudioReactorWaveStyle: Codable, Equatable, Sendable {
 }
 
 public struct AudioReactorStyle: Codable, Equatable, Sendable {
+    public static let maxSpectrumLayerCount = 8
+
     public var presetID: String?
     public var palette: AudioReactorPalette
     public var spectrum: AudioReactorSpectrumStyle
+    public var spectrumLayers: [AudioReactorSpectrumLayer] {
+        didSet { spectrumLayers = Self.clampedSpectrumLayers(spectrumLayers) }
+    }
     public var ring: AudioReactorRingStyle
     public var wave: AudioReactorWaveStyle
     public var scale: Double {
@@ -387,6 +425,7 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
         presetID: String?,
         palette: AudioReactorPalette,
         spectrum: AudioReactorSpectrumStyle,
+        spectrumLayers: [AudioReactorSpectrumLayer]? = nil,
         ring: AudioReactorRingStyle,
         wave: AudioReactorWaveStyle,
         scale: Double = 1.0,
@@ -396,6 +435,9 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
         self.presetID = presetID
         self.palette = palette
         self.spectrum = spectrum
+        self.spectrumLayers = Self.clampedSpectrumLayers(
+            spectrumLayers ?? [Self.defaultLayer(name: "Spectrum 1", spectrum: spectrum)]
+        )
         self.ring = ring
         self.wave = wave
         self.scale = Self.clampScale(scale)
@@ -405,10 +447,13 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let spectrum = try container.decodeIfPresent(AudioReactorSpectrumStyle.self, forKey: .spectrum) ?? Self.default.spectrum
+        let decodedLayers = try container.decodeIfPresent([AudioReactorSpectrumLayer].self, forKey: .spectrumLayers)
         self.init(
             presetID: try container.decodeIfPresent(String.self, forKey: .presetID),
             palette: try container.decodeIfPresent(AudioReactorPalette.self, forKey: .palette) ?? .default,
-            spectrum: try container.decodeIfPresent(AudioReactorSpectrumStyle.self, forKey: .spectrum) ?? Self.default.spectrum,
+            spectrum: spectrum,
+            spectrumLayers: decodedLayers ?? [Self.defaultLayer(name: "Spectrum 1", spectrum: spectrum)],
             ring: try container.decodeIfPresent(AudioReactorRingStyle.self, forKey: .ring) ?? Self.default.ring,
             wave: try container.decodeIfPresent(AudioReactorWaveStyle.self, forKey: .wave) ?? Self.default.wave,
             scale: try container.decodeIfPresent(Double.self, forKey: .scale) ?? 1.0,
@@ -427,6 +472,14 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
         return min(max(value, 0.5), 1.5)
     }
 
+    public static func defaultLayer(name: String, spectrum: AudioReactorSpectrumStyle) -> AudioReactorSpectrumLayer {
+        AudioReactorSpectrumLayer(name: name, spectrum: spectrum)
+    }
+
+    public static func clampedSpectrumLayers(_ layers: [AudioReactorSpectrumLayer]) -> [AudioReactorSpectrumLayer] {
+        Array(layers.prefix(maxSpectrumLayerCount))
+    }
+
     public static let `default` = preset(.studio)
 
     public static func preset(_ id: AudioReactorStylePresetID) -> AudioReactorStyle {
@@ -437,19 +490,19 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
                 palette: .default,
                 spectrum: AudioReactorSpectrumStyle(
                     layout: .bottom,
-                    barCount: 48,
-                    barWidth: 0.48,
-                    barHeight: 0.74,
-                    spacing: 0.35,
+                    barCount: 44,
+                    barWidth: 0.3,
+                    barHeight: 0.42,
+                    spacing: 0.5,
                     radius: 0.56,
-                    roundness: 0.82,
-                    smoothing: 0.45,
-                    glow: 0.48,
+                    roundness: 0.9,
+                    smoothing: 0.62,
+                    glow: 0.18,
                     arcStartDegrees: -150,
                     arcEndDegrees: 150
                 ),
-                ring: AudioReactorRingStyle(radius: 0.36, thickness: 0.018, softness: 0.55, glow: 0.62, roundness: 0.9),
-                wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.012, amplitude: 0.55, smoothing: 0.6, glow: 0.42, radius: 0.58, arcStartDegrees: -150, arcEndDegrees: 150)
+                ring: AudioReactorRingStyle(radius: 0.34, thickness: 0.007, softness: 0.8, glow: 0.22, roundness: 1),
+                wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.005, amplitude: 0.3, smoothing: 0.72, glow: 0.12, radius: 0.58, arcStartDegrees: -150, arcEndDegrees: 150)
             )
         case .orbit:
             return AudioReactorStyle(
@@ -563,35 +616,6 @@ public struct AudioReactorStyle: Codable, Equatable, Sendable {
     }
 }
 
-public struct AudioReactorOverlayLayoutMetrics: Equatable, Sendable {
-    public var scale: Float
-    public var bottomRailStart: Float
-    public var bottomRailWidth: Float
-    public var bottomBaseY: Float
-    public var radialScale: Float
-    public var centerY: Float
-
-    public static func make(resolution: SIMD2<Float>, scale: Double) -> AudioReactorOverlayLayoutMetrics {
-        let width = max(resolution.x, 1)
-        let height = max(resolution.y, 1)
-        let aspect = min(max(width / height, 0.1), 4)
-        let portraitAmount = min(max((1 - aspect) / 0.45, 0), 1)
-        let safeScale = Float(AudioReactorStyle.clampScale(scale))
-        let portraitWidthCompression = 1 - portraitAmount * 0.18
-        let railWidth = min(max(0.85 * portraitWidthCompression * safeScale, 0.52), 0.9)
-        let radialScale = min(max((1 - portraitAmount * 0.24) * safeScale, 0.45), 1.35)
-
-        return AudioReactorOverlayLayoutMetrics(
-            scale: safeScale,
-            bottomRailStart: (1 - railWidth) * 0.5,
-            bottomRailWidth: railWidth,
-            bottomBaseY: 0.058 + portraitAmount * 0.045 + max(safeScale - 1, 0) * 0.012,
-            radialScale: radialScale,
-            centerY: 0.53 + portraitAmount * 0.035
-        )
-    }
-}
-
 private extension AudioReactorStylePresetID {
     var displayName: String {
         switch self {
@@ -651,7 +675,7 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
+        var decoded = AudioReactorPreferences(
             isEnabled: try container.decode(Bool.self, forKey: .isEnabled),
             intensity: try container.decode(Double.self, forKey: .intensity),
             response: try container.decode(AudioReactorResponse.self, forKey: .response),
@@ -663,9 +687,25 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
             beatGate: try container.decodeIfPresent(Bool.self, forKey: .beatGate) ?? false,
             style: try container.decodeIfPresent(AudioReactorStyle.self, forKey: .style) ?? .default
         )
+        if !decoded.showsSpectrumBars {
+            decoded.style.spectrumLayers = []
+        }
+        self = decoded.migratedFromLegacyStudioDefaults()
     }
 
     public static let defaults = AudioReactorPreferences(
+        isEnabled: true,
+        intensity: 0.8,
+        response: .punchy,
+        bassPulseStrength: 0.28,
+        showsPulseRing: false,
+        showsSpectrumBars: true,
+        showsWaveLine: false,
+        overlayOpacity: 0.38,
+        style: .default
+    )
+
+    private static let legacyStudioDefaults = AudioReactorPreferences(
         isEnabled: true,
         intensity: 0.8,
         response: .punchy,
@@ -674,8 +714,49 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
         showsSpectrumBars: true,
         showsWaveLine: false,
         overlayOpacity: 0.6,
-        style: .default
+        style: AudioReactorStyle(
+            presetID: AudioReactorStylePresetID.studio.rawValue,
+            palette: .default,
+            spectrum: AudioReactorSpectrumStyle(
+                layout: .bottom,
+                barCount: 48,
+                barWidth: 0.48,
+                barHeight: 0.74,
+                spacing: 0.35,
+                radius: 0.56,
+                roundness: 0.82,
+                smoothing: 0.45,
+                glow: 0.48,
+                arcStartDegrees: -150,
+                arcEndDegrees: 150
+            ),
+            ring: AudioReactorRingStyle(radius: 0.36, thickness: 0.018, softness: 0.55, glow: 0.62, roundness: 0.9),
+            wave: AudioReactorWaveStyle(layout: .bottom, thickness: 0.012, amplitude: 0.55, smoothing: 0.6, glow: 0.42, radius: 0.58, arcStartDegrees: -150, arcEndDegrees: 150)
+        )
     )
+
+    private func migratedFromLegacyStudioDefaults() -> AudioReactorPreferences {
+        let legacy = Self.legacyStudioDefaults
+        guard isEnabled == legacy.isEnabled,
+              intensity == legacy.intensity,
+              response == legacy.response,
+              bassPulseStrength == legacy.bassPulseStrength,
+              showsPulseRing == legacy.showsPulseRing,
+              showsSpectrumBars == legacy.showsSpectrumBars,
+              showsWaveLine == legacy.showsWaveLine,
+              overlayOpacity == legacy.overlayOpacity,
+              beatGate == legacy.beatGate,
+              style.presetID == legacy.style.presetID,
+              style.palette == legacy.style.palette,
+              style.spectrum == legacy.style.spectrum,
+              style.ring == legacy.style.ring,
+              style.wave == legacy.style.wave,
+              style.scale == legacy.style.scale,
+              style.colorCycle == legacy.style.colorCycle,
+              style.motionTrail == legacy.style.motionTrail
+        else { return self }
+        return Self.defaults
+    }
 
     public func shaped(_ features: AudioFeatures) -> AudioFeatures {
         guard isEnabled else { return .silent }
@@ -694,6 +775,35 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
         let gain = Float(Self.clamp(intensity)) * response.gain
         let shaped = pow(clamped, response.exponent) * gain
         return Self.clamp(shaped)
+    }
+
+    public var activeSpectrumLayers: [AudioReactorSpectrumLayer] {
+        guard isEnabled else { return [] }
+        return style.spectrumLayers.filter { $0.isEnabled && $0.opacity > 0 }
+    }
+
+    @discardableResult
+    public mutating func addSpectrumLayer(duplicating id: String? = nil) -> String? {
+        guard style.spectrumLayers.count < AudioReactorStyle.maxSpectrumLayerCount else { return nil }
+        let source = id.flatMap { targetID in
+            style.spectrumLayers.first { $0.id == targetID }
+        } ?? style.spectrumLayers.last ?? AudioReactorStyle.defaultLayer(
+            name: "Spectrum 1",
+            spectrum: style.spectrum
+        )
+        var layer = source
+        layer.id = UUID().uuidString
+        layer.name = "Spectrum \(style.spectrumLayers.count + 1)"
+        style.presetID = nil
+        style.spectrumLayers.append(layer)
+        showsSpectrumBars = true
+        return layer.id
+    }
+
+    public mutating func removeSpectrumLayer(id: String) {
+        style.presetID = nil
+        style.spectrumLayers.removeAll { $0.id == id }
+        showsSpectrumBars = !style.spectrumLayers.isEmpty
     }
 
     func downsampleSpectrum(_ spectrum: [Float], count: Int) -> [Float] {
@@ -740,31 +850,5 @@ public struct AudioReactorPreferences: Codable, Equatable, Sendable {
     public static func clamp(_ value: Float) -> Float {
         guard value.isFinite else { return 0 }
         return min(max(value, 0), 1)
-    }
-}
-
-public struct AudioReactorPreferencesStore: Sendable {
-    private let fileURL: URL
-
-    public init(fileURL: URL) {
-        self.fileURL = fileURL
-    }
-
-    public func load() throws -> AudioReactorPreferences {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return .defaults
-        }
-
-        let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder().decode(AudioReactorPreferences.self, from: data)
-    }
-
-    public func save(_ preferences: AudioReactorPreferences) throws {
-        let directory = fileURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(preferences)
-        try data.write(to: fileURL, options: .atomic)
     }
 }

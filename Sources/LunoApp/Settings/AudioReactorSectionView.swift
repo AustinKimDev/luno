@@ -17,11 +17,10 @@ final class AudioReactorSectionView: NSView {
     private let intensitySlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
     private let responseControl = NSSegmentedControl(labels: ["Soft", "Punchy", "Hard"], trackingMode: .selectOne, target: nil, action: nil)
     private let overlayOpacitySlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-    private let bassPulseSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
     private let scaleSlider = LabeledValueSlider(minValue: 0.5, maxValue: 1.5, displayAsPercent: true)
-    private let pulseRingSwitch = NSSwitch()
-    private let spectrumBarsSwitch = NSSwitch()
-    private let waveLineSwitch = NSSwitch()
+    private let layerPopup = NSPopUpButton()
+    private let addLayerButton = NSButton(title: "+", target: nil, action: nil)
+    private let removeLayerButton = NSButton(title: "-", target: nil, action: nil)
 
     private let primaryColorWell = NSColorWell()
     private let secondaryColorWell = NSColorWell()
@@ -55,29 +54,12 @@ final class AudioReactorSectionView: NSView {
     private let spectrumArcStartSlider = LabeledValueSlider(minValue: -180, maxValue: 180)
     private let spectrumArcEndSlider = LabeledValueSlider(minValue: -180, maxValue: 180)
 
-    private let ringRadiusSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-    private let ringThicknessSlider = LabeledValueSlider(minValue: 0, maxValue: 0.08, displayAsPercent: true)
-    private let ringSoftnessSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-    private let ringGlowSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-    private let ringRoundnessSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-
     private let mirrorSpectrumSwitch = NSSwitch()
     private let colorCycleSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-    private let beatGateSwitch = NSSwitch()
-    private let motionTrailSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-    private let advancedBox = NSBox()
-
-    private let waveLayoutPopup = NSPopUpButton()
-    private let waveThicknessSlider = LabeledValueSlider(minValue: 0, maxValue: 0.08, displayAsPercent: true)
-    private let waveAmplitudeSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-    private let waveSmoothingSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-    private let waveGlowSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-    private let waveRadiusSlider = LabeledValueSlider(minValue: 0, maxValue: 1, displayAsPercent: true)
-    private let waveArcStartSlider = LabeledValueSlider(minValue: -180, maxValue: 180)
-    private let waveArcEndSlider = LabeledValueSlider(minValue: -180, maxValue: 180)
 
     private var preferences: AudioReactorPreferences = .defaults
     private var isInternallyUpdating = false
+    private var selectedLayerID: String?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -102,11 +84,10 @@ final class AudioReactorSectionView: NSView {
         intensitySlider.value = preferences.intensity
         responseControl.selectedSegment = AudioReactorResponse.allCases.firstIndex(of: preferences.response) ?? 1
         overlayOpacitySlider.value = preferences.overlayOpacity
-        bassPulseSlider.value = preferences.bassPulseStrength
         scaleSlider.value = preferences.style.scale
-        pulseRingSwitch.state = preferences.showsPulseRing ? .on : .off
-        spectrumBarsSwitch.state = preferences.showsSpectrumBars ? .on : .off
-        waveLineSwitch.state = preferences.showsWaveLine ? .on : .off
+        if selectedLayerID == nil || !preferences.style.spectrumLayers.contains(where: { $0.id == selectedLayerID }) {
+            selectedLayerID = preferences.style.spectrumLayers.first?.id
+        }
 
         primaryColorWell.color = NSColor(hexString: preferences.style.palette.primaryColor) ?? .white
         secondaryColorWell.color = NSColor(hexString: preferences.style.palette.secondaryColor) ?? .white
@@ -117,37 +98,10 @@ final class AudioReactorSectionView: NSView {
         albumModeControl.selectedSegment = modeIndex
         albumModeRow.isHidden = preferences.style.palette.source != .albumArtwork
 
-        selectLayout(spectrumLayoutPopup, preferences.style.spectrum.layout)
-        spectrumBarCountSlider.value = Double(preferences.style.spectrum.barCount)
-        spectrumBarWidthSlider.value = preferences.style.spectrum.barWidth
-        spectrumBarHeightSlider.value = preferences.style.spectrum.barHeight
-        spectrumSpacingSlider.value = preferences.style.spectrum.spacing
-        spectrumRadiusSlider.value = preferences.style.spectrum.radius
-        spectrumRoundnessSlider.value = preferences.style.spectrum.roundness
-        spectrumSmoothingSlider.value = preferences.style.spectrum.smoothing
-        spectrumGlowSlider.value = preferences.style.spectrum.glow
-        spectrumArcStartSlider.value = preferences.style.spectrum.arcStartDegrees
-        spectrumArcEndSlider.value = preferences.style.spectrum.arcEndDegrees
+        rebuildLayerMenu()
+        updateLayerControls()
 
-        ringRadiusSlider.value = preferences.style.ring.radius
-        ringThicknessSlider.value = preferences.style.ring.thickness
-        ringSoftnessSlider.value = preferences.style.ring.softness
-        ringGlowSlider.value = preferences.style.ring.glow
-        ringRoundnessSlider.value = preferences.style.ring.roundness
-
-        selectLayout(waveLayoutPopup, preferences.style.wave.layout)
-        waveThicknessSlider.value = preferences.style.wave.thickness
-        waveAmplitudeSlider.value = preferences.style.wave.amplitude
-        waveSmoothingSlider.value = preferences.style.wave.smoothing
-        waveGlowSlider.value = preferences.style.wave.glow
-        waveRadiusSlider.value = preferences.style.wave.radius
-        waveArcStartSlider.value = preferences.style.wave.arcStartDegrees
-        waveArcEndSlider.value = preferences.style.wave.arcEndDegrees
-
-        mirrorSpectrumSwitch.state = preferences.style.spectrum.mirrored ? .on : .off
         colorCycleSlider.value = preferences.style.colorCycle
-        beatGateSwitch.state = preferences.beatGate ? .on : .off
-        motionTrailSlider.value = preferences.style.motionTrail
     }
 
     private func buildLayout() {
@@ -201,11 +155,7 @@ final class AudioReactorSectionView: NSView {
             labeled("Intensity", control: intensitySlider),
             labeled("Response", control: responseControl),
             labeled("Overlay opacity", control: overlayOpacitySlider),
-            labeled("Bass pulse", control: bassPulseSlider),
-            labeled("Scale", control: scaleSlider),
-            labeled("Pulse ring", control: pulseRingSwitch),
-            labeled("Spectrum bars", control: spectrumBarsSwitch),
-            labeled("Wave line", control: waveLineSwitch)
+            labeled("Scale", control: scaleSlider)
         ]))
 
         stack.addArrangedSubview(group("Palette", rows: [
@@ -218,7 +168,8 @@ final class AudioReactorSectionView: NSView {
         ]))
 
         configureLayoutPopup(spectrumLayoutPopup, selector: #selector(spectrumLayoutChanged))
-        stack.addArrangedSubview(group("Spectrum Bars", rows: [
+        stack.addArrangedSubview(group("Spectrum Layers", rows: [
+            layerControlsRow(),
             labeled("Layout", control: spectrumLayoutPopup),
             labeled("Count", control: spectrumBarCountSlider),
             labeled("Width", control: spectrumBarWidthSlider),
@@ -232,27 +183,7 @@ final class AudioReactorSectionView: NSView {
             labeled("Arc end", control: spectrumArcEndSlider)
         ]))
 
-        stack.addArrangedSubview(group("Pulse Ring", rows: [
-            labeled("Radius", control: ringRadiusSlider),
-            labeled("Weight", control: ringThicknessSlider),
-            labeled("Softness", control: ringSoftnessSlider),
-            labeled("Glow", control: ringGlowSlider),
-            labeled("Roundness", control: ringRoundnessSlider)
-        ]))
-
-        configureLayoutPopup(waveLayoutPopup, selector: #selector(waveLayoutChanged))
-        stack.addArrangedSubview(group("Wave Line", rows: [
-            labeled("Layout", control: waveLayoutPopup),
-            labeled("Weight", control: waveThicknessSlider),
-            labeled("Height", control: waveAmplitudeSlider),
-            labeled("Smoothing", control: waveSmoothingSlider),
-            labeled("Glow", control: waveGlowSlider),
-            labeled("Radius", control: waveRadiusSlider),
-            labeled("Arc start", control: waveArcStartSlider),
-            labeled("Arc end", control: waveArcEndSlider)
-        ]))
-
-        stack.addArrangedSubview(makeAdvancedBox())
+        stack.addArrangedSubview(makeAdvancedGroup())
 
         wireActions()
         rebuildPresetMenu()
@@ -263,16 +194,15 @@ final class AudioReactorSectionView: NSView {
         enableSwitch.action = #selector(enabledChanged)
         responseControl.target = self
         responseControl.action = #selector(responseChanged)
-        pulseRingSwitch.target = self
-        pulseRingSwitch.action = #selector(pulseRingChanged)
-        spectrumBarsSwitch.target = self
-        spectrumBarsSwitch.action = #selector(spectrumBarsChanged)
-        waveLineSwitch.target = self
-        waveLineSwitch.action = #selector(waveLineChanged)
+        layerPopup.target = self
+        layerPopup.action = #selector(layerSelectionChanged)
+        addLayerButton.target = self
+        addLayerButton.action = #selector(addLayer)
+        removeLayerButton.target = self
+        removeLayerButton.action = #selector(removeLayer)
 
         intensitySlider.onChange = { [weak self] value in self?.commitField { $0.intensity = value } }
         overlayOpacitySlider.onChange = { [weak self] value in self?.commitField { $0.overlayOpacity = value } }
-        bassPulseSlider.onChange = { [weak self] value in self?.commitField { $0.bassPulseStrength = value } }
         scaleSlider.onChange = { [weak self] value in self?.styleField { $0.scale = value } }
 
         configureColorWell(primaryColorWell, selector: #selector(colorChanged))
@@ -283,37 +213,20 @@ final class AudioReactorSectionView: NSView {
         albumModeControl.target = self
         albumModeControl.action = #selector(albumModeChanged)
 
-        spectrumBarCountSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.barCount = Int(round(value)) } }
-        spectrumBarWidthSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.barWidth = value } }
-        spectrumBarHeightSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.barHeight = value } }
-        spectrumSpacingSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.spacing = value } }
-        spectrumRadiusSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.radius = value } }
-        spectrumRoundnessSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.roundness = value } }
-        spectrumSmoothingSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.smoothing = value } }
-        spectrumGlowSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.glow = value } }
-        spectrumArcStartSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.arcStartDegrees = value } }
-        spectrumArcEndSlider.onChange = { [weak self] value in self?.styleField { $0.spectrum.arcEndDegrees = value } }
-
-        ringRadiusSlider.onChange = { [weak self] value in self?.styleField { $0.ring.radius = value } }
-        ringThicknessSlider.onChange = { [weak self] value in self?.styleField { $0.ring.thickness = value } }
-        ringSoftnessSlider.onChange = { [weak self] value in self?.styleField { $0.ring.softness = value } }
-        ringGlowSlider.onChange = { [weak self] value in self?.styleField { $0.ring.glow = value } }
-        ringRoundnessSlider.onChange = { [weak self] value in self?.styleField { $0.ring.roundness = value } }
-
-        waveThicknessSlider.onChange = { [weak self] value in self?.styleField { $0.wave.thickness = value } }
-        waveAmplitudeSlider.onChange = { [weak self] value in self?.styleField { $0.wave.amplitude = value } }
-        waveSmoothingSlider.onChange = { [weak self] value in self?.styleField { $0.wave.smoothing = value } }
-        waveGlowSlider.onChange = { [weak self] value in self?.styleField { $0.wave.glow = value } }
-        waveRadiusSlider.onChange = { [weak self] value in self?.styleField { $0.wave.radius = value } }
-        waveArcStartSlider.onChange = { [weak self] value in self?.styleField { $0.wave.arcStartDegrees = value } }
-        waveArcEndSlider.onChange = { [weak self] value in self?.styleField { $0.wave.arcEndDegrees = value } }
+        spectrumBarCountSlider.onChange = { [weak self] value in self?.layerField { $0.spectrum.barCount = Int(round(value)) } }
+        spectrumBarWidthSlider.onChange = { [weak self] value in self?.layerField { $0.spectrum.barWidth = value } }
+        spectrumBarHeightSlider.onChange = { [weak self] value in self?.layerField { $0.spectrum.barHeight = value } }
+        spectrumSpacingSlider.onChange = { [weak self] value in self?.layerField { $0.spectrum.spacing = value } }
+        spectrumRadiusSlider.onChange = { [weak self] value in self?.layerField { $0.spectrum.radius = value } }
+        spectrumRoundnessSlider.onChange = { [weak self] value in self?.layerField { $0.spectrum.roundness = value } }
+        spectrumSmoothingSlider.onChange = { [weak self] value in self?.layerField { $0.spectrum.smoothing = value } }
+        spectrumGlowSlider.onChange = { [weak self] value in self?.layerField { $0.spectrum.glow = value } }
+        spectrumArcStartSlider.onChange = { [weak self] value in self?.layerField { $0.spectrum.arcStartDegrees = value } }
+        spectrumArcEndSlider.onChange = { [weak self] value in self?.layerField { $0.spectrum.arcEndDegrees = value } }
 
         mirrorSpectrumSwitch.target = self
         mirrorSpectrumSwitch.action = #selector(mirrorSpectrumChanged)
         colorCycleSlider.onChange = { [weak self] value in self?.styleField { $0.colorCycle = value } }
-        beatGateSwitch.target = self
-        beatGateSwitch.action = #selector(beatGateChanged)
-        motionTrailSlider.onChange = { [weak self] value in self?.styleField { $0.motionTrail = value } }
     }
 
     private func labeled(_ title: String, control: NSView) -> NSStackView {
@@ -324,6 +237,17 @@ final class AudioReactorSectionView: NSView {
         row.alignment = .centerY
         row.spacing = 12
         return row
+    }
+
+    private func layerControlsRow() -> NSStackView {
+        layerPopup.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        addLayerButton.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        removeLayerButton.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        let controls = NSStackView(views: [layerPopup, addLayerButton, removeLayerButton])
+        controls.orientation = .horizontal
+        controls.alignment = .centerY
+        controls.spacing = 6
+        return labeled("Layer", control: controls)
     }
 
     private func group(_ title: String, rows: [NSView]) -> NSStackView {
@@ -375,23 +299,11 @@ final class AudioReactorSectionView: NSView {
         popup.selectItem(at: index)
     }
 
-    private func makeAdvancedBox() -> NSBox {
-        let box = advancedBox
-        box.title = "Advanced"
-        box.titlePosition = .atTop
-        box.boxType = .primary
-        let content = NSStackView(views: [
+    private func makeAdvancedGroup() -> NSStackView {
+        group("Advanced", rows: [
             labeled("Mirror spectrum", control: mirrorSpectrumSwitch),
-            labeled("Color cycle", control: colorCycleSlider),
-            labeled("Beat gate", control: beatGateSwitch),
-            labeled("Motion trail", control: motionTrailSlider)
+            labeled("Color cycle", control: colorCycleSlider)
         ])
-        content.orientation = .vertical
-        content.alignment = .leading
-        content.spacing = 6
-        content.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
-        box.contentView = content
-        return box
     }
 
     private func selectPaletteSource(_ source: AudioReactorPaletteSource) {
@@ -419,12 +331,64 @@ final class AudioReactorSectionView: NSView {
         }
     }
 
+    private func rebuildLayerMenu() {
+        layerPopup.removeAllItems()
+        for layer in preferences.style.spectrumLayers {
+            layerPopup.addItem(withTitle: layer.name)
+            layerPopup.lastItem?.representedObject = layer.id
+        }
+        if let selectedLayerID,
+           let index = preferences.style.spectrumLayers.firstIndex(where: { $0.id == selectedLayerID }) {
+            layerPopup.selectItem(at: index)
+        } else if !preferences.style.spectrumLayers.isEmpty {
+            selectedLayerID = preferences.style.spectrumLayers[0].id
+            layerPopup.selectItem(at: 0)
+        } else {
+            selectedLayerID = nil
+        }
+    }
+
+    private func updateLayerControls() {
+        guard let layer = selectedLayer else {
+            selectLayout(spectrumLayoutPopup, .bottom)
+            spectrumBarCountSlider.value = 8
+            spectrumBarWidthSlider.value = 0
+            spectrumBarHeightSlider.value = 0
+            spectrumSpacingSlider.value = 0
+            spectrumRadiusSlider.value = 0
+            spectrumRoundnessSlider.value = 0
+            spectrumSmoothingSlider.value = 0
+            spectrumGlowSlider.value = 0
+            spectrumArcStartSlider.value = -150
+            spectrumArcEndSlider.value = 150
+            mirrorSpectrumSwitch.state = .off
+            return
+        }
+
+        selectLayout(spectrumLayoutPopup, layer.spectrum.layout)
+        spectrumBarCountSlider.value = Double(layer.spectrum.barCount)
+        spectrumBarWidthSlider.value = layer.spectrum.barWidth
+        spectrumBarHeightSlider.value = layer.spectrum.barHeight
+        spectrumSpacingSlider.value = layer.spectrum.spacing
+        spectrumRadiusSlider.value = layer.spectrum.radius
+        spectrumRoundnessSlider.value = layer.spectrum.roundness
+        spectrumSmoothingSlider.value = layer.spectrum.smoothing
+        spectrumGlowSlider.value = layer.spectrum.glow
+        spectrumArcStartSlider.value = layer.spectrum.arcStartDegrees
+        spectrumArcEndSlider.value = layer.spectrum.arcEndDegrees
+        mirrorSpectrumSwitch.state = layer.spectrum.mirrored ? .on : .off
+    }
+
+    private var selectedLayer: AudioReactorSpectrumLayer? {
+        guard let selectedLayerID else { return nil }
+        return preferences.style.spectrumLayers.first { $0.id == selectedLayerID }
+    }
+
     private func applyEnabledState() {
         let active = preferences.isEnabled
         [
             intensitySlider,
             overlayOpacitySlider,
-            bassPulseSlider,
             scaleSlider,
             spectrumBarCountSlider,
             spectrumBarWidthSlider,
@@ -436,38 +400,38 @@ final class AudioReactorSectionView: NSView {
             spectrumGlowSlider,
             spectrumArcStartSlider,
             spectrumArcEndSlider,
-            ringRadiusSlider,
-            ringThicknessSlider,
-            ringSoftnessSlider,
-            ringGlowSlider,
-            ringRoundnessSlider,
-            waveThicknessSlider,
-            waveAmplitudeSlider,
-            waveSmoothingSlider,
-            waveGlowSlider,
-            waveRadiusSlider,
-            waveArcStartSlider,
-            waveArcEndSlider,
-            colorCycleSlider,
-            motionTrailSlider
+            colorCycleSlider
         ].forEach { $0.isEnabled = active }
 
         [
             responseControl,
-            pulseRingSwitch,
-            spectrumBarsSwitch,
-            waveLineSwitch,
+            layerPopup,
+            addLayerButton,
+            removeLayerButton,
             primaryColorWell,
             secondaryColorWell,
             accentColorWell,
             glowColorWell,
             paletteSourcePopup,
             spectrumLayoutPopup,
-            waveLayoutPopup,
             albumModeControl,
-            mirrorSpectrumSwitch,
-            beatGateSwitch
+            mirrorSpectrumSwitch
         ].forEach { $0.isEnabled = active }
+
+        let hasLayer = active && selectedLayerID != nil
+        removeLayerButton.isEnabled = active && selectedLayerID != nil
+        spectrumBarCountSlider.isEnabled = hasLayer
+        spectrumBarWidthSlider.isEnabled = hasLayer
+        spectrumBarHeightSlider.isEnabled = hasLayer
+        spectrumSpacingSlider.isEnabled = hasLayer
+        spectrumRadiusSlider.isEnabled = hasLayer
+        spectrumRoundnessSlider.isEnabled = hasLayer
+        spectrumSmoothingSlider.isEnabled = hasLayer
+        spectrumGlowSlider.isEnabled = hasLayer
+        spectrumArcStartSlider.isEnabled = hasLayer
+        spectrumArcEndSlider.isEnabled = hasLayer
+        spectrumLayoutPopup.isEnabled = hasLayer
+        mirrorSpectrumSwitch.isEnabled = hasLayer
 
         let usesManualColors = active && preferences.style.palette.source == .manual
         [primaryColorWell, secondaryColorWell, accentColorWell, glowColorWell].forEach {
@@ -492,6 +456,20 @@ final class AudioReactorSectionView: NSView {
         isInternallyUpdating = false
     }
 
+    private func layerField(_ mutate: (inout AudioReactorSpectrumLayer) -> Void) {
+        guard let selectedLayerID else { return }
+        commitField { preferences in
+            guard let index = preferences.style.spectrumLayers.firstIndex(where: { $0.id == selectedLayerID }) else { return }
+            preferences.style.presetID = nil
+            mutate(&preferences.style.spectrumLayers[index])
+            preferences.style.spectrum = preferences.style.spectrumLayers[index].spectrum
+        }
+        isInternallyUpdating = true
+        rebuildPresetMenu()
+        rebuildLayerMenu()
+        isInternallyUpdating = false
+    }
+
     @objc private func presetChanged(_ sender: NSPopUpButton) {
         guard !isInternallyUpdating,
               let id = sender.selectedItem?.representedObject as? String,
@@ -513,18 +491,6 @@ final class AudioReactorSectionView: NSView {
         let cases = AudioReactorResponse.allCases
         guard cases.indices.contains(sender.selectedSegment) else { return }
         commitField { $0.response = cases[sender.selectedSegment] }
-    }
-
-    @objc private func pulseRingChanged(_ sender: NSSwitch) {
-        commitField { $0.showsPulseRing = sender.state == .on }
-    }
-
-    @objc private func spectrumBarsChanged(_ sender: NSSwitch) {
-        commitField { $0.showsSpectrumBars = sender.state == .on }
-    }
-
-    @objc private func waveLineChanged(_ sender: NSSwitch) {
-        commitField { $0.showsWaveLine = sender.state == .on }
     }
 
     @objc private func colorChanged(_ sender: NSColorWell) {
@@ -560,23 +526,39 @@ final class AudioReactorSectionView: NSView {
               let rawValue = sender.selectedItem?.representedObject as? String,
               let layout = AudioReactorVisualizerLayout(rawValue: rawValue)
         else { return }
-        styleField { $0.spectrum.layout = layout }
-    }
-
-    @objc private func waveLayoutChanged(_ sender: NSPopUpButton) {
-        guard !isInternallyUpdating,
-              let rawValue = sender.selectedItem?.representedObject as? String,
-              let layout = AudioReactorVisualizerLayout(rawValue: rawValue)
-        else { return }
-        styleField { $0.wave.layout = layout }
+        layerField { $0.spectrum.layout = layout }
     }
 
     @objc private func mirrorSpectrumChanged(_ sender: NSSwitch) {
-        commitField { $0.style.spectrum.mirrored = sender.state == .on }
+        layerField { $0.spectrum.mirrored = sender.state == .on }
     }
 
-    @objc private func beatGateChanged(_ sender: NSSwitch) {
-        commitField { $0.beatGate = sender.state == .on }
+    @objc private func layerSelectionChanged(_ sender: NSPopUpButton) {
+        guard !isInternallyUpdating else { return }
+        selectedLayerID = sender.selectedItem?.representedObject as? String
+        isInternallyUpdating = true
+        updateLayerControls()
+        applyEnabledState()
+        isInternallyUpdating = false
+    }
+
+    @objc private func addLayer(_ sender: NSButton) {
+        guard !isInternallyUpdating else { return }
+        var updated = preferences
+        if let addedID = updated.addSpectrumLayer(duplicating: selectedLayerID) {
+            selectedLayerID = addedID
+        }
+        configure(updated)
+        delegate?.audioReactorSection(self, didChange: preferences)
+    }
+
+    @objc private func removeLayer(_ sender: NSButton) {
+        guard !isInternallyUpdating, let selectedLayerID else { return }
+        var updated = preferences
+        updated.removeSpectrumLayer(id: selectedLayerID)
+        self.selectedLayerID = updated.style.spectrumLayers.first?.id
+        configure(updated)
+        delegate?.audioReactorSection(self, didChange: preferences)
     }
 }
 
@@ -638,31 +620,16 @@ private final class AudioReactorPreviewView: NSView {
         context.setFillColor(NSColor(calibratedWhite: 0.055, alpha: 1).cgColor)
         context.fill(bounds)
 
-        var style = preferences.style
-        style.palette = style.palette.resolved(with: .fallback)
-        if preferences.showsPulseRing {
-            drawRing(in: rect, style: style, context: context)
-        }
-        if preferences.showsSpectrumBars {
+        let resolvedPalette = preferences.style.palette.resolved(with: .fallback)
+        for layer in preferences.activeSpectrumLayers {
+            var style = preferences.style
+            style.palette = resolvedPalette
+            style.spectrum = layer.spectrum
             drawSpectrum(in: rect, style: style, context: context)
-        }
-        if preferences.showsWaveLine {
-            drawWave(in: rect, style: style, context: context)
         }
 
         context.setStrokeColor(NSColor.white.withAlphaComponent(0.08).cgColor)
         context.stroke(rect, width: 1)
-    }
-
-    private func drawRing(in rect: CGRect, style: AudioReactorStyle, context: CGContext) {
-        let center = CGPoint(x: rect.midX, y: rect.midY + 4)
-        let scale = CGFloat(style.scale)
-        let radius = min(rect.width, rect.height) * (0.18 + style.ring.radius * 0.25) * scale
-        let lineWidth = max(1, rect.height * CGFloat(style.ring.thickness) * scale)
-        let color = NSColor(hexString: style.palette.secondaryColor) ?? .systemCyan
-        context.setStrokeColor(color.withAlphaComponent(0.42 + style.ring.glow * 0.34).cgColor)
-        context.setLineWidth(lineWidth)
-        context.strokeEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
     }
 
     private func drawSpectrum(in rect: CGRect, style: AudioReactorStyle, context: CGContext) {
@@ -724,47 +691,6 @@ private final class AudioReactorPreviewView: NSView {
             context.setStrokeColor(color.withAlphaComponent(0.78).cgColor)
             context.move(to: inner)
             context.addLine(to: outer)
-            context.strokePath()
-        }
-    }
-
-    private func drawWave(in rect: CGRect, style: AudioReactorStyle, context: CGContext) {
-        let color = NSColor(hexString: style.palette.glowColor) ?? .white
-        let scale = CGFloat(style.scale)
-        context.setStrokeColor(color.withAlphaComponent(0.62 + style.wave.glow * 0.22).cgColor)
-        context.setLineWidth(max(1, rect.height * CGFloat(style.wave.thickness) * scale))
-        context.setLineCap(.round)
-
-        if style.wave.layout == .bottom {
-            let path = CGMutablePath()
-            let railWidth = rect.width * min(max(0.85 * scale, 0.52), 0.9)
-            let rail = CGRect(
-                x: rect.midX - railWidth / 2,
-                y: rect.minY + 26,
-                width: railWidth,
-                height: rect.height - 52
-            )
-            for index in 0..<sampleValues.count {
-                let x = rail.minX + CGFloat(index) / CGFloat(sampleValues.count - 1) * rail.width
-                let y = rect.maxY - 62 - CGFloat(sampleValues[index]) * CGFloat(22 + style.wave.amplitude * 44) * scale
-                index == 0 ? path.move(to: CGPoint(x: x, y: y)) : path.addLine(to: CGPoint(x: x, y: y))
-            }
-            context.addPath(path)
-            context.strokePath()
-        } else {
-            let center = CGPoint(x: rect.midX, y: rect.midY + 4)
-            let baseRadius = min(rect.width, rect.height) * CGFloat(0.16 + style.wave.radius * 0.3) * scale
-            let start = style.wave.layout == .circle ? -180 : style.wave.arcStartDegrees
-            let end = style.wave.layout == .circle ? 180 : style.wave.arcEndDegrees
-            let path = CGMutablePath()
-            for index in 0..<sampleValues.count {
-                let unit = Double(index) / Double(sampleValues.count - 1)
-                let angle = (start + (end - start) * unit) * .pi / 180
-                let radius = baseRadius + CGFloat(sampleValues[index]) * CGFloat(8 + style.wave.amplitude * 34) * scale
-                let point = point(center: center, radius: radius, angle: angle)
-                index == 0 ? path.move(to: point) : path.addLine(to: point)
-            }
-            context.addPath(path)
             context.strokePath()
         }
     }

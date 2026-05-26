@@ -4,11 +4,18 @@ public struct DisplayAssignment: Codable, Equatable, Sendable {
     public var displayID: String
     public var packageID: String
     public var presetID: String
+    public var values: [String: ParameterValue]?
 
-    public init(displayID: String, packageID: String, presetID: String) {
+    public init(
+        displayID: String,
+        packageID: String,
+        presetID: String,
+        values: [String: ParameterValue]? = nil
+    ) {
         self.displayID = displayID
         self.packageID = packageID
         self.presetID = presetID
+        self.values = values
     }
 }
 

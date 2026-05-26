@@ -224,6 +224,43 @@ public enum AudioReactorColorMath {
         }
     }
 
+    public struct SpectrumEnvelopeBuffer: Sendable {
+        public var previous: [Float] = []
+
+        public init() {}
+
+        public mutating func apply(
+            input: [Float],
+            smoothing: Double,
+            deltaTime: Float,
+            into output: inout [Float]
+        ) {
+            guard output.count == input.count else {
+                output = input
+                previous = input
+                return
+            }
+            if previous.count != input.count {
+                previous = Array(repeating: 0, count: input.count)
+            }
+
+            let amount = Float(min(max(smoothing, 0), 1))
+            let attackTau = Float(0.010 + 0.045 * amount)
+            let releaseTau = Float(0.055 + 0.22 * amount)
+            let safeDelta = max(deltaTime, 0)
+            let attackAlpha = min(max(1 - exp(-safeDelta / max(attackTau, 0.000_001)), 0), 1)
+            let releaseAlpha = min(max(1 - exp(-safeDelta / max(releaseTau, 0.000_001)), 0), 1)
+
+            for index in input.indices {
+                let target = input[index]
+                let alpha = target >= previous[index] ? attackAlpha : releaseAlpha
+                let value = previous[index] + (target - previous[index]) * alpha
+                output[index] = value
+                previous[index] = value
+            }
+        }
+    }
+
     public static func applyColorCycle(hex: String, cycleRate: Double, time: Double) -> String {
         guard cycleRate > 0 else { return hex }
         let trimmed = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#").union(.whitespacesAndNewlines))

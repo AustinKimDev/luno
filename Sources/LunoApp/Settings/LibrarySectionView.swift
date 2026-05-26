@@ -86,7 +86,7 @@ final class LibrarySectionView: NSView {
 
     func rebuildParameterControls(
         with package: LunoPackageRecord?,
-        presets: [WallpaperPreset]
+        preset: WallpaperPreset?
     ) {
         controlsByParameterID.removeAll()
         parameterStack.arrangedSubviews.forEach {
@@ -99,18 +99,17 @@ final class LibrarySectionView: NSView {
             return
         }
 
-        let matchingPreset = presets.first { $0.packageID == package.manifest.id }
-        presetNameField.stringValue = matchingPreset?.name ?? "Default"
+        presetNameField.stringValue = preset?.name ?? "Default"
 
         for parameter in package.manifest.parameters {
-            let currentValue = matchingPreset?.values[parameter.id] ?? parameter.defaultValue
+            let currentValue = preset?.values[parameter.id] ?? parameter.defaultValue
             let control = makeControl(for: parameter, value: currentValue)
             controlsByParameterID[parameter.id] = control
             parameterStack.addArrangedSubview(labeledRow(label: parameter.name, view: control))
         }
 
         if usesSyntheticAudioReactiveControl(for: package.manifest) {
-            let value = matchingPreset?.values[Self.audioReactiveParameterID] ?? .bool(true)
+            let value = preset?.values[Self.audioReactiveParameterID] ?? .bool(true)
             let control = makeBoolControl(value: value)
             controlsByParameterID[Self.audioReactiveParameterID] = control
             parameterStack.addArrangedSubview(labeledRow(label: "Audio Reactive", view: control))

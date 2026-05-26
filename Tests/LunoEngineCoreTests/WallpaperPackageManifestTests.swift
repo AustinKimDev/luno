@@ -38,8 +38,7 @@ final class WallpaperPackageManifestTests: XCTestCase {
         )
             .filter { $0.pathExtension == "luno" }
 
-        XCTAssertGreaterThan(packageURLs.count, 0)
-        XCTAssertTrue(packageURLs.contains { $0.lastPathComponent == "AlbumPalette.luno" })
+        XCTAssertEqual(packageURLs.map(\.lastPathComponent), ["AlbumPalette.luno"])
 
         for packageURL in packageURLs {
             let manifestURL = packageURL.appending(path: "manifest.json")

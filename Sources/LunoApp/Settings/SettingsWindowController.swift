@@ -28,6 +28,7 @@ final class SettingsWindowController: NSWindowController {
 
     private var packages: [LunoPackageRecord] = []
     private var presets: [WallpaperPreset] = []
+    private var assignments: [DisplayAssignment] = []
     private var nowPlayingPreferences: NowPlayingPreferences = .defaults
     private var audioReactorPreferences: AudioReactorPreferences = .defaults
 
@@ -58,12 +59,21 @@ final class SettingsWindowController: NSWindowController {
         sidebar.selectInitialItem()
     }
 
-    func configure(packages: [LunoPackageRecord], presets: [WallpaperPreset]) {
+    func configure(
+        packages: [LunoPackageRecord],
+        presets: [WallpaperPreset],
+        assignments: [DisplayAssignment]
+    ) {
         self.packages = packages
         self.presets = presets
+        self.assignments = assignments
         reloadPackages()
         reloadDisplays()
-        librarySection.rebuildParameterControls(with: selectedPackage, presets: presets)
+        rebuildLibraryParameterControls()
+    }
+
+    func configureAssignments(_ assignments: [DisplayAssignment]) {
+        self.assignments = assignments
     }
 
     func configureNowPlaying(_ preferences: NowPlayingPreferences) {
@@ -89,6 +99,8 @@ final class SettingsWindowController: NSWindowController {
             popup.addItem(withTitle: title)
             popup.lastItem?.representedObject = displayID.map { NSNumber(value: $0) }
         }
+        popup.target = self
+        popup.action = #selector(displaySelectionChanged)
     }
 
     private func buildUI(in root: NSView) {
@@ -160,7 +172,7 @@ final class SettingsWindowController: NSWindowController {
             popup.addItem(withTitle: package.manifest.name)
             popup.lastItem?.representedObject = package.manifest.id
         }
-        librarySection.rebuildParameterControls(with: selectedPackage, presets: presets)
+        rebuildLibraryParameterControls()
     }
 
     private var selectedPackage: LunoPackageRecord? {
@@ -191,6 +203,38 @@ final class SettingsWindowController: NSWindowController {
         )
     }
 
+    private func currentPreset(for package: LunoPackageRecord) -> WallpaperPreset? {
+        if let assignment = selectedAssignment(for: package) {
+            if let values = assignment.values {
+                return WallpaperPreset(
+                    id: assignment.presetID,
+                    packageID: package.manifest.id,
+                    name: presets.first { $0.id == assignment.presetID && $0.packageID == package.manifest.id }?.name ?? "Default",
+                    values: values
+                )
+            }
+            return presets.first { $0.id == assignment.presetID && $0.packageID == package.manifest.id }
+        }
+        return presets.first { $0.packageID == package.manifest.id }
+    }
+
+    private func selectedAssignment(for package: LunoPackageRecord) -> DisplayAssignment? {
+        if let displayID = selectedDisplayID {
+            return assignments.first {
+                $0.packageID == package.manifest.id && $0.displayID == String(displayID)
+            }
+        }
+        return assignments.first { $0.packageID == package.manifest.id }
+    }
+
+    private func rebuildLibraryParameterControls() {
+        guard let package = selectedPackage else {
+            librarySection.rebuildParameterControls(with: nil, preset: nil)
+            return
+        }
+        librarySection.rebuildParameterControls(with: package, preset: currentPreset(for: package))
+    }
+
     private func applySelectedPackage() {
         guard let package = selectedPackage else { return }
         delegate?.settingsWindow(
@@ -202,8 +246,12 @@ final class SettingsWindowController: NSWindowController {
     }
 
     @objc private func packageSelectionChanged() {
-        librarySection.rebuildParameterControls(with: selectedPackage, presets: presets)
+        rebuildLibraryParameterControls()
         applySelectedPackage()
+    }
+
+    @objc private func displaySelectionChanged() {
+        rebuildLibraryParameterControls()
     }
 }
 

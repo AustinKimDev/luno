@@ -42,12 +42,14 @@ public final class NowPlayingPipeline: @unchecked Sendable {
                     continue
                 }
 
-                let resolved = await Self.resolve(track: track, fetcher: fetcher)
-                let key = Self.key(for: resolved)
-                if key != lastEmittedKey {
-                    lastEmittedKey = key
-                    continuation.yield(resolved)
+                let key = Self.key(for: track)
+                guard key != lastEmittedKey else {
+                    continue
                 }
+
+                let resolved = await Self.resolve(track: track, fetcher: fetcher)
+                lastEmittedKey = key
+                continuation.yield(resolved)
             }
             continuation.finish()
         }
@@ -70,7 +72,7 @@ public final class NowPlayingPipeline: @unchecked Sendable {
         return ResolvedNowPlayingTrack(track: track, artworkData: artworkData)
     }
 
-    private static func key(for track: ResolvedNowPlayingTrack) -> String {
+    private static func key(for track: NowPlayingTrack) -> String {
         "\(track.title)|\(track.artist ?? "")|\(track.album ?? "")|\(track.isPlaying)"
     }
 }

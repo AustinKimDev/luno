@@ -32,7 +32,7 @@ final class NowPlayingViewModel {
     private let coordinator: NowPlayingCoordinator
     private let pipeline: NowPlayingPipeline
     private let preferencesStore: NowPlayingPreferencesStore
-    private let audioFeaturesProvider: @MainActor () -> AudioFeatures
+    private let bassLevelProvider: @MainActor () -> Double
     private var consumerTask: Task<Void, Never>?
     private var animationTimer: Timer?
     private var fadeOutTask: Task<Void, Never>?
@@ -44,13 +44,13 @@ final class NowPlayingViewModel {
         pipeline: NowPlayingPipeline,
         preferencesStore: NowPlayingPreferencesStore,
         preferences: NowPlayingPreferences,
-        audioFeaturesProvider: @escaping @MainActor () -> AudioFeatures
+        bassLevelProvider: @escaping @MainActor () -> Double
     ) {
         self.coordinator = coordinator
         self.pipeline = pipeline
         self.preferencesStore = preferencesStore
         self.preferences = preferences
-        self.audioFeaturesProvider = audioFeaturesProvider
+        self.bassLevelProvider = bassLevelProvider
     }
 
     func start() {
@@ -176,10 +176,9 @@ final class NowPlayingViewModel {
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let features = audioFeaturesProvider()
                 let hoverScale = isHovering ? 0.3 : 1.0
                 let strength = preferences.audioReactivityEnabled ? preferences.audioReactivityIntensity : 0
-                pulseAmplitude = Double(features.bass) * strength * hoverScale
+                pulseAmplitude = bassLevelProvider() * strength * hoverScale
             }
         }
     }

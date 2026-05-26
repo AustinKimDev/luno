@@ -240,6 +240,20 @@ final class AudioReactorColorMathTests: XCTestCase {
         XCTAssertEqual(output[0], 0.87, accuracy: 0.001)
     }
 
+    func testSpectrumEnvelopeUsesFastAttackAndSlowerRelease() {
+        var buffer = AudioReactorColorMath.SpectrumEnvelopeBuffer()
+        var output: [Float] = []
+
+        buffer.apply(input: [1.0], smoothing: 0.25, deltaTime: 1.0 / 60.0, into: &output)
+        let attacked = output[0]
+        buffer.apply(input: [0.0], smoothing: 0.25, deltaTime: 1.0 / 60.0, into: &output)
+        let released = output[0]
+
+        XCTAssertGreaterThan(attacked, 0.45)
+        XCTAssertGreaterThan(released, 0.25)
+        XCTAssertLessThan(released, attacked)
+    }
+
     func testApplyColorCycleNoCycleReturnsInputHex() {
         let cycled = AudioReactorColorMath.applyColorCycle(hex: "#24C7FF", cycleRate: 0, time: 5)
         XCTAssertEqual(cycled, "#24C7FF")

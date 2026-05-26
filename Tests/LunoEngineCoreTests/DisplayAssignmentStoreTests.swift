@@ -6,7 +6,12 @@ final class DisplayAssignmentStoreTests: XCTestCase {
         let directory = try temporaryDirectory()
         let store = DisplayAssignmentStore(fileURL: directory.appending(path: "assignments.json"))
         let assignments = [
-            DisplayAssignment(displayID: "main-display", packageID: "com.example.aurora", presetID: "night"),
+            DisplayAssignment(
+                displayID: "main-display",
+                packageID: "com.example.aurora",
+                presetID: "night",
+                values: ["reactive": .bool(false), "speed": .float(0.42)]
+            ),
             DisplayAssignment(displayID: "studio-display", packageID: "com.example.plasma", presetID: "calm")
         ]
 
