@@ -37,6 +37,19 @@ hdiutil create \
   -format UDZO \
   "$DMG_PATH"
 
+if [[ -z "${LUNO_CODESIGN_IDENTITY:-}" ]]; then
+  LUNO_CODESIGN_IDENTITY="$(
+    security find-identity -v -p codesigning \
+      | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' \
+      | head -n 1
+  )"
+fi
+
+if [[ -n "${LUNO_CODESIGN_IDENTITY:-}" && "$LUNO_CODESIGN_IDENTITY" != "-" ]]; then
+  codesign --force --sign "$LUNO_CODESIGN_IDENTITY" "$DMG_PATH"
+  codesign --verify --verbose=2 "$DMG_PATH"
+fi
+
 (
   cd "$DIST_DIR"
   shasum -a 256 "$DMG_NAME" > "$CHECKSUMS_PATH"

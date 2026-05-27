@@ -12,6 +12,14 @@ jobs:
   build-release:
     name: Build macOS release
     runs-on: macos-15
+    env:
+      APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      LUNO_CODESIGN_IDENTITY: ${{ secrets.LUNO_CODESIGN_IDENTITY }}
 
     steps:
       - name: Check out repository
@@ -23,8 +31,45 @@ jobs:
       - name: Run tests
         run: swift test
 
+      - name: Validate signing and notarization secrets
+        run: |
+          missing=()
+          for name in \
+            APPLE_CERTIFICATE_BASE64 \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_KEYCHAIN_PASSWORD \
+            APPLE_ID \
+            APPLE_TEAM_ID \
+            APPLE_APP_SPECIFIC_PASSWORD
+          do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            echo "Missing required release signing secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Import Developer ID certificate
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 -D > "$CERTIFICATE_PATH"
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
       - name: Package release app
         run: scripts/package-release.sh "${GITHUB_REF_NAME}"
+
+      - name: Notarize release DMG
+        run: scripts/notarize-release.sh "${GITHUB_REF_NAME}"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

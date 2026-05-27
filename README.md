@@ -58,6 +58,9 @@ git push origin main --tags
 Pushing a `v*` tag runs the GitHub Actions release workflow, builds the app,
 creates a GitHub Release, and uploads the DMG plus `SHA256SUMS`.
 
+Developer ID signing and notarization setup is documented in
+[docs/release-signing.md](docs/release-signing.md).
+
 ## License
 
 Luno is available under the MIT License. See [LICENSE](LICENSE).
